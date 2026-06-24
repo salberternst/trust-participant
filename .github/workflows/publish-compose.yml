@@ -1,4 +1,4 @@
-name: Publish Compose and Init Image
+name: Publish Compose and Helper Images
 
 on:
   push:
@@ -29,6 +29,14 @@ jobs:
       - name: Validate init script syntax
         run: sh -n init/participant-init.sh
 
+      - name: Install portal gateway dependencies
+        working-directory: portal-gateway
+        run: npm ci
+
+      - name: Build portal gateway frontend
+        working-directory: portal-gateway
+        run: npm run build
+
       - name: Compute artifact references
         id: meta
         shell: bash
@@ -48,11 +56,13 @@ jobs:
           fi
           echo "image=ghcr.io/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
           echo "init_image=ghcr.io/${IMAGE_NAME}-init" >> "$GITHUB_OUTPUT"
+          echo "portal_gateway_image=ghcr.io/${IMAGE_NAME}-portal-gateway" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Validate Compose model
         env:
           PARTICIPANT_INIT_IMAGE: ${{ steps.meta.outputs.init_image }}:${{ steps.meta.outputs.version }}
+          PARTICIPANT_PORTAL_GATEWAY_IMAGE: ${{ steps.meta.outputs.portal_gateway_image }}:${{ steps.meta.outputs.version }}
         run: docker compose --env-file .env.example config
 
       - name: Log in to GHCR
@@ -70,13 +80,27 @@ jobs:
           docker tag "${{ steps.meta.outputs.init_image }}:${{ steps.meta.outputs.version }}" "${{ steps.meta.outputs.init_image }}:latest"
           docker push "${{ steps.meta.outputs.init_image }}:latest"
 
+      - name: Build portal gateway image
+        run: docker build -f portal-gateway/Dockerfile -t "${{ steps.meta.outputs.portal_gateway_image }}:${{ steps.meta.outputs.version }}" portal-gateway
+
+      - name: Publish versioned portal gateway image
+        run: docker push "${{ steps.meta.outputs.portal_gateway_image }}:${{ steps.meta.outputs.version }}"
+
+      - name: Publish latest portal gateway image
+        if: github.event_name == 'push'
+        run: |
+          docker tag "${{ steps.meta.outputs.portal_gateway_image }}:${{ steps.meta.outputs.version }}" "${{ steps.meta.outputs.portal_gateway_image }}:latest"
+          docker push "${{ steps.meta.outputs.portal_gateway_image }}:latest"
+
       - name: Publish versioned Compose artifact
         env:
           PARTICIPANT_INIT_IMAGE: ${{ steps.meta.outputs.init_image }}:${{ steps.meta.outputs.version }}
+          PARTICIPANT_PORTAL_GATEWAY_IMAGE: ${{ steps.meta.outputs.portal_gateway_image }}:${{ steps.meta.outputs.version }}
         run: docker compose --env-file .env.example publish -y "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}"
 
       - name: Publish latest Compose artifact
         if: github.event_name == 'push'
         env:
           PARTICIPANT_INIT_IMAGE: ${{ steps.meta.outputs.init_image }}:latest
+          PARTICIPANT_PORTAL_GATEWAY_IMAGE: ${{ steps.meta.outputs.portal_gateway_image }}:latest
         run: docker compose --env-file .env.example publish -y "${{ steps.meta.outputs.image }}:latest"

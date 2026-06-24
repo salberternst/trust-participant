@@ -315,6 +315,69 @@ services:
         aliases:
           - ${PARTICIPANT_ROLE:-participant}-dataplane
 
+  portal:
+    image: ${PARTICIPANT_PORTAL_IMAGE:-ghcr.io/salberternst/portal:latest}
+    configs:
+      - source: portal-config
+        target: /usr/share/nginx/html/config.js
+    environment:
+      EDC_MANAGEMENT_API_URL: "http://${PARTICIPANT_ROLE:-participant}-controlplane:8081/management/"
+      EDC_PROTOCOL_API_URL: "http://${PARTICIPANT_ROLE:-participant}-controlplane:8084/api/v1/dsp/"
+      EDC_API_KEY: "${EDC_API_KEY:-password}"
+    depends_on:
+      controlplane:
+        condition: service_healthy
+        restart: true
+      dataplane:
+        condition: service_healthy
+        restart: true
+    networks:
+      internal:
+        aliases:
+          - ${PARTICIPANT_ROLE:-participant}-portal
+
+  portal-gateway:
+    image: ${PARTICIPANT_PORTAL_GATEWAY_IMAGE:-ghcr.io/salberternst/trust-participant-portal-gateway:latest}
+    environment:
+      PORT: "3000"
+      PORTAL_UPSTREAM_URL: "http://${PARTICIPANT_ROLE:-participant}-portal:80"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@postgres:5432/participant_onboarding"
+      ONBOARDING_DATASPACE_ADMIN_API_URL: "${ONBOARDING_DATASPACE_ADMIN_API_URL:-http://dataspace-admin:3000/api}"
+      ONBOARDING_ORGANIZATION_NAME: "${ONBOARDING_ORGANIZATION_NAME:-}"
+      ONBOARDING_REQUESTED_BPN: "${ONBOARDING_REQUESTED_BPN:-${PARTICIPANT_BPN:-BPNL00000003AYRE}}"
+      ONBOARDING_CONTACT_EMAIL: "${ONBOARDING_CONTACT_EMAIL:-}"
+      ONBOARDING_REQUESTED_ROLE: "${ONBOARDING_REQUESTED_ROLE:-participant}"
+      ONBOARDING_DID: "${ONBOARDING_DID:-did:web:${PARTICIPANT_DID_HOST:-participant.external.test}:${PARTICIPANT_BPN:-BPNL00000003AYRE}}"
+      ONBOARDING_DSP_ENDPOINT: "${ONBOARDING_DSP_ENDPOINT:-${PUBLIC_DSP_CALLBACK_ADDRESS:-https://${PARTICIPANT_PUBLIC_HOST:-participant.external.test}/api/v1/dsp}}"
+      ONBOARDING_CREDENTIAL_SERVICE_ENDPOINT: "${ONBOARDING_CREDENTIAL_SERVICE_ENDPOINT:-https://${PARTICIPANT_PUBLIC_HOST:-participant.external.test}/api/credentials}"
+      IDENTITYHUB_IDENTITY_API_URL: "http://identityhub:8082/api/identity"
+      IDENTITYHUB_PARTICIPANT_CONTEXT_ID: "${IDENTITYHUB_PARTICIPANT_CONTEXT_ID:-${PARTICIPANT_BPN:-BPNL00000003AYRE}}"
+      IDENTITYHUB_PARTICIPANT_CONTEXT_PATH_ID: "${PARTICIPANT_BPN_BASE64:-QlBOTDAwMDAwMDAzQVlSRQ==}"
+      IDENTITYHUB_API_KEY: "${IDENTITYHUB_API_KEY:-}"
+      IDENTITYHUB_VAULT_URL: "http://wallet-vault:8200"
+      IDENTITYHUB_VAULT_TOKEN: "${VAULT_DEV_ROOT_TOKEN_ID:-root}"
+      IDENTITYHUB_API_KEY_VAULT_PATH: "/v1/secret/data/${IDENTITYHUB_PARTICIPANT_CONTEXT_ID:-${PARTICIPANT_BPN:-BPNL00000003AYRE}}-apikey"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      identityhub:
+        condition: service_healthy
+      participant-init:
+        condition: service_completed_successfully
+      portal:
+        condition: service_started
+    networks:
+      backend: {}
+      internal:
+        aliases:
+          - ${PARTICIPANT_ROLE:-participant}-portal-gateway
+
   public-gateway:
     image: nginx:alpine
     configs:
@@ -354,10 +417,13 @@ services:
         condition: service_healthy
       dataplane:
         condition: service_healthy
+      portal-gateway:
+        condition: service_healthy
     networks:
       internal:
         aliases:
           - ${PARTICIPANT_INTERNAL_HOST:-participant.internal.test}
+          - ${PARTICIPANT_PORTAL_INTERNAL_HOST:-portal.internal.test}
           - ${PARTICIPANT_ROLE:-participant}-internal
 
 volumes:
@@ -368,6 +434,7 @@ configs:
     content: |
       CREATE DATABASE participant_wallet;
       CREATE DATABASE edc_participant;
+      CREATE DATABASE participant_onboarding;
   ih-logging:
     content: |
       .level=INFO
@@ -379,6 +446,12 @@ configs:
   opentelemetry:
     content: |
       otel.sdk.disabled=true
+  portal-config:
+    content: |
+      var config = {
+        title: "${PORTAL_TITLE:-Participant Portal}",
+        publicEdcEndpoint: "${PORTAL_PUBLIC_EDC_ENDPOINT:-}"
+      }
   nginx-participant-public:
     content: |
       server {
@@ -419,7 +492,7 @@ configs:
     content: |
       server {
           listen 80;
-          server_name ${PARTICIPANT_INTERNAL_HOST:-participant.internal.test} _;
+          server_name ${PARTICIPANT_INTERNAL_HOST:-participant.internal.test} ${PARTICIPANT_PORTAL_INTERNAL_HOST:-portal.internal.test} _;
 
           location /management/ {
               proxy_pass http://${PARTICIPANT_ROLE:-participant}-controlplane:8081/management/;
@@ -449,6 +522,15 @@ configs:
               proxy_pass http://${PARTICIPANT_ROLE:-participant}-controlplane:8085/.well-known/api/;
               proxy_set_header Host $$host;
               proxy_set_header X-Real-IP $$remote_addr;
+          }
+
+          location / {
+              proxy_pass http://${PARTICIPANT_ROLE:-participant}-portal-gateway:3000;
+              proxy_http_version 1.1;
+              proxy_set_header Host $$host;
+              proxy_set_header X-Real-IP $$remote_addr;
+              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $$scheme;
           }
       }
 

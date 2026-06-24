@@ -1,6 +1,6 @@
 # Trust Participant
 
-Reusable Docker Compose stack for one dataspace participant: IdentityHub, Tractus-X EDC control plane, data plane, Postgres, Vault, and public/internal gateways.
+Reusable Docker Compose stack for one dataspace participant: IdentityHub, Tractus-X EDC control plane, data plane, Postgres, Vault, the participant portal, and public/internal gateways.
 
 ## Quick Start
 
@@ -22,7 +22,7 @@ It does the participant-local setup only:
 - creates the IdentityHub participant context as active,
 - copies the generated STS client secret and participant signing key into connector Vault.
 
-BDRS registration, demo assets, credential issuance, and onboarding belong to the trust operator or a higher-level deployment stack.
+BDRS registration, demo assets, and credential issuance stay with the trust operator or a higher-level deployment stack. The participant-side onboarding UI is handled by `portal-gateway`, which stores its local state in Postgres and proxies to the portal after credentials are issued.
 
 For local init image development:
 
@@ -36,7 +36,7 @@ PARTICIPANT_INIT_IMAGE=trust-participant-init:local docker compose up -d
 | Surface | Compose network | Example URL | Purpose |
 | --- | --- | --- | --- |
 | Docker-internal | `backend` | none | Postgres, Vault, and init jobs. No host ports. |
-| Internal/company | `internal` | `participant.internal.test`, `portal.internal.test` | Private participant APIs and optional portals. |
+| Internal/company | `internal` | `participant.internal.test`, `portal.internal.test` | Private participant APIs and the participant portal gate. |
 | Public dataspace | `public` | `participant.external.test` | Public gateway routes required for federation. |
 
 Only gateways join the `public` network. IdentityHub, control plane, and data plane stay on `internal`; Postgres, Vault, and init jobs stay on `backend`.
@@ -81,8 +81,35 @@ Most settings have local defaults in `.env.example`. These are the important dep
 | `ISSUER_DID_HOST`, `BPN_ISSUER` | `issuer.external.test`, `BPNL00000003CRHK` | Trusted issuer DID host and BPN. |
 | `TRUST_PARTICIPANT_PUBLIC_NETWORK` | `trust-public` | Shared public Docker network for the public gateway. |
 | `TRUST_PARTICIPANT_PUBLIC_NETWORK_EXTERNAL` | `false` | Set to `true` when another stack owns the public network. |
+| `PARTICIPANT_PORTAL_IMAGE` | `ghcr.io/salberternst/portal:latest` | Portal image proxied after onboarding completes. |
+| `PARTICIPANT_PORTAL_GATEWAY_IMAGE` | `ghcr.io/salberternst/trust-participant-portal-gateway:latest` | Participant-owned onboarding gate image. |
+| `PARTICIPANT_PORTAL_INTERNAL_HOST` | `portal.internal.test` | Internal hostname for the portal gate. |
+| `PORTAL_TITLE` | `Participant Portal` | Title written into the portal runtime config. |
+| `PORTAL_PUBLIC_EDC_ENDPOINT` | empty | Optional remote DSP endpoint shown/used by the portal. |
+| `ONBOARDING_DATASPACE_ADMIN_API_URL` | `http://dataspace-admin:3000/api` | Trust operator dataspace-admin participant API. |
+| `ONBOARDING_ORGANIZATION_NAME` | `Example Participant` | Default organization shown in the onboarding form. |
+| `ONBOARDING_CONTACT_EMAIL` | `ops@example.test` | Default contact email shown in the onboarding form. |
+| `ONBOARDING_CREDENTIAL_SERVICE_ENDPOINT` | `https://participant.external.test/api/credentials` | Public credential service metadata submitted for onboarding. |
 
 `PARTICIPANT_INTERNAL_HOST` names the private gateway for company/VPN/local-only access to management and identity APIs.
+
+
+## Participant Portal
+
+The internal gateway routes `/` to `portal-gateway`. That service shows the onboarding form until the participant credentials are issued, observed in the local IdentityHub, and reported back to dataspace-admin. After that, it proxies the normal portal image.
+
+The portal is internal-only by default. It is not connected to the public gateway and does not bind its own host port.
+
+For local portal-gateway image development:
+
+```sh
+cd portal-gateway
+npm ci
+npm run build
+cd ..
+docker build -t trust-participant-portal-gateway:local -f portal-gateway/Dockerfile portal-gateway
+PARTICIPANT_PORTAL_GATEWAY_IMAGE=trust-participant-portal-gateway:local docker compose up -d
+```
 
 ## Publish as OCI
 
@@ -91,6 +118,7 @@ Tag pushes publish both artifacts to GHCR via `.github/workflows/publish-compose
 ```text
 ghcr.io/salberternst/trust-participant:0.1.0
 ghcr.io/salberternst/trust-participant-init:0.1.0
+ghcr.io/salberternst/trust-participant-portal-gateway:0.1.0
 ```
 
 On tag pushes, `latest` is published too. The semantic-dataspace participant overlays include the compose artifact directly:
