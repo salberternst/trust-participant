@@ -18,10 +18,10 @@ The `participant-init` service uses a published helper image, not a local Compos
 - waits for the local IdentityHub health endpoint,
 - reads the IdentityHub super-user API key from the wallet Vault unless `IDENTITYHUB_API_KEY` is set,
 - creates the IdentityHub participant context if it does not already exist,
-- activates the participant context through the IdentityHub API,
+- requests the participant context as active during creation,
 - copies the generated STS client secret and participant signing key into the connector Vault.
 
-It does not register BDRS entries, create demo assets, request credentials, or touch IdentityHub tables directly. Those belong to the operator, onboarding flow, or demo stack.
+It does not register BDRS entries, create demo assets, request credentials, call the IdentityHub participant state endpoint, or touch IdentityHub tables directly. Those belong to the operator, onboarding flow, or demo stack.
 
 For local image development:
 

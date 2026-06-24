@@ -70,6 +70,21 @@ wait_vault_get() {
     return 1
 }
 
+wait_vault_get_first() {
+    vault_addr="$1"
+    shift
+
+    for key in "$@"; do
+        value="$(wait_vault_get "$vault_addr" "$key" 2>/dev/null || true)"
+        if [ -n "$value" ] && [ "$value" != "null" ]; then
+            printf '%s' "$value"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 vault_put() {
     vault_addr="$1"
     key="$2"
@@ -174,20 +189,19 @@ case "$status" in
     *) printf '%s\n' "$body" >&2; fail "participant context creation failed with HTTP ${status}" ;;
 esac
 
-encoded_context_id="$(urlencode "$IDENTITYHUB_CONTEXT_ID")"
-log "Activating IdentityHub participant context ${IDENTITYHUB_CONTEXT_ID}"
-result="$(http_status_with_body POST "${IDENTITYHUB_IDENTITY_URL}/v1alpha/participants/${encoded_context_id}/state?isActive=true")"
-status="$(printf '%s' "$result" | sed -n '1p')"
-body="$(printf '%s' "$result" | sed '1d')"
-case "$status" in
-    200|204) log "IdentityHub participant context active" ;;
-    *) printf '%s\n' "$body" >&2; fail "participant context activation failed with HTTP ${status}" ;;
-esac
+log "IdentityHub participant context active state requested"
 
 log "Syncing participant STS and token signer secrets to connector Vault"
-sts_secret="$(wait_vault_get "$WALLET_VAULT_ADDR" "${PARTICIPANT_BPN}-sts-client-secret")" ||
-    fail "STS client secret ${PARTICIPANT_BPN}-sts-client-secret unavailable in wallet Vault"
-participant_key="$(wait_vault_get "$WALLET_VAULT_ADDR" "$PARTICIPANT_KEY_ALIAS")" ||
+sts_secret="$(wait_vault_get_first \
+    "$WALLET_VAULT_ADDR" \
+    "${IDENTITYHUB_CONTEXT_ID}-sts-client-secret" \
+    "${PARTICIPANT_BPN}-sts-client-secret")" ||
+    fail "STS client secret unavailable in wallet Vault"
+participant_key="$(wait_vault_get_first \
+    "$WALLET_VAULT_ADDR" \
+    "$PARTICIPANT_KEY_ALIAS" \
+    "${IDENTITYHUB_CONTEXT_ID}-key-1" \
+    "${PARTICIPANT_BPN}-key-1")" ||
     fail "participant key ${PARTICIPANT_KEY_ALIAS} unavailable in wallet Vault"
 
 vault_put "$CONNECTOR_VAULT_ADDR" sts-oauth-client-secret "$sts_secret"
