@@ -1,4 +1,4 @@
-name: Publish Compose OCI Artifact
+name: Publish Compose and Init Image
 
 on:
   push:
@@ -26,10 +26,10 @@ jobs:
       - name: Show Docker Compose version
         run: docker compose version
 
-      - name: Validate Compose model
-        run: docker compose --env-file .env.example config
+      - name: Validate init script syntax
+        run: sh -n init/participant-init.sh
 
-      - name: Compute artifact reference
+      - name: Compute artifact references
         id: meta
         shell: bash
         env:
@@ -47,14 +47,36 @@ jobs:
             VERSION="${GITHUB_REF_NAME#v}"
           fi
           echo "image=ghcr.io/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "init_image=ghcr.io/${IMAGE_NAME}-init" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate Compose model
+        env:
+          PARTICIPANT_INIT_IMAGE: ${{ steps.meta.outputs.init_image }}:${{ steps.meta.outputs.version }}
+        run: docker compose --env-file .env.example config
 
       - name: Log in to GHCR
         run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
+      - name: Build init image
+        run: docker build -f init/Dockerfile -t "${{ steps.meta.outputs.init_image }}:${{ steps.meta.outputs.version }}" init
+
+      - name: Publish versioned init image
+        run: docker push "${{ steps.meta.outputs.init_image }}:${{ steps.meta.outputs.version }}"
+
+      - name: Publish latest init image
+        if: github.event_name == 'push'
+        run: |
+          docker tag "${{ steps.meta.outputs.init_image }}:${{ steps.meta.outputs.version }}" "${{ steps.meta.outputs.init_image }}:latest"
+          docker push "${{ steps.meta.outputs.init_image }}:latest"
+
       - name: Publish versioned Compose artifact
+        env:
+          PARTICIPANT_INIT_IMAGE: ${{ steps.meta.outputs.init_image }}:${{ steps.meta.outputs.version }}
         run: docker compose --env-file .env.example publish -y "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}"
 
       - name: Publish latest Compose artifact
         if: github.event_name == 'push'
+        env:
+          PARTICIPANT_INIT_IMAGE: ${{ steps.meta.outputs.init_image }}:latest
         run: docker compose --env-file .env.example publish -y "${{ steps.meta.outputs.image }}:latest"

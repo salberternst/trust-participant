@@ -161,6 +161,35 @@ services:
         aliases:
           - ${PARTICIPANT_ROLE:-participant}-identityhub
 
+  participant-init:
+    image: ${PARTICIPANT_INIT_IMAGE:-ghcr.io/salberternst/trust-participant-init:latest}
+    environment:
+      PARTICIPANT_ROLE: ${PARTICIPANT_ROLE:-participant}
+      PARTICIPANT_BPN: ${PARTICIPANT_BPN:-BPNL00000003AYRE}
+      PARTICIPANT_BPN_BASE64: ${PARTICIPANT_BPN_BASE64:-QlBOTDAwMDAwMDAzQVlSRQ==}
+      IDENTITYHUB_PARTICIPANT_CONTEXT_ID: ${IDENTITYHUB_PARTICIPANT_CONTEXT_ID:-${PARTICIPANT_BPN:-BPNL00000003AYRE}}
+      PARTICIPANT_DID_HOST: ${PARTICIPANT_DID_HOST:-participant.external.test}
+      PARTICIPANT_PUBLIC_HOST: ${PARTICIPANT_PUBLIC_HOST:-participant.external.test}
+      PUBLIC_DSP_CALLBACK_ADDRESS: ${PUBLIC_DSP_CALLBACK_ADDRESS:-https://participant.external.test/api/v1/dsp}
+      PUBLIC_CREDENTIAL_SERVICE_ENDPOINT: ${PUBLIC_CREDENTIAL_SERVICE_ENDPOINT:-}
+      IDENTITYHUB_API_KEY: ${IDENTITYHUB_API_KEY:-}
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN_ID:-root}
+      IDENTITYHUB_IDENTITY_URL: "http://identityhub:8082/api/identity"
+      IDENTITYHUB_HEALTH_URL: "http://identityhub:8081/api/check/health"
+      WALLET_VAULT_ADDR: "http://wallet-vault:8200"
+      CONNECTOR_VAULT_ADDR: "http://connector-vault:8200"
+    depends_on:
+      identityhub:
+        condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
+      connector-vault:
+        condition: service_healthy
+    networks:
+      backend:
+        aliases:
+          - ${PARTICIPANT_ROLE:-participant}-init
+
   controlplane:
     image: tractusx/edc-controlplane-postgresql-hashicorp-vault:${TRACTUSX_EDC_TAG:-0.12.1}
     configs:
@@ -225,6 +254,8 @@ services:
         condition: service_completed_successfully
       identityhub:
         condition: service_healthy
+      participant-init:
+        condition: service_completed_successfully
     networks:
       backend: {}
       internal:

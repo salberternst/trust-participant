@@ -9,7 +9,26 @@ cp .env.example .env
 docker compose up -d
 ```
 
-This starts the participant runtime plus two gateway surfaces: the public dataspace gateway and the private internal gateway. Both bind to loopback by default for local safety.
+This starts the participant runtime plus two gateway surfaces: the public dataspace gateway and the private internal gateway. Both bind to loopback by default for local safety. A one-shot `participant-init` service provisions the participant wallet before the connector starts.
+
+## Participant Init
+
+The `participant-init` service uses a published helper image, not a local Compose build context. That keeps the Compose file usable when it is included from an OCI registry. The init job:
+
+- waits for the local IdentityHub health endpoint,
+- reads the IdentityHub super-user API key from the wallet Vault unless `IDENTITYHUB_API_KEY` is set,
+- creates the IdentityHub participant context if it does not already exist,
+- activates the participant context through the IdentityHub API,
+- copies the generated STS client secret and participant signing key into the connector Vault.
+
+It does not register BDRS entries, create demo assets, request credentials, or touch IdentityHub tables directly. Those belong to the operator, onboarding flow, or demo stack.
+
+For local image development:
+
+```sh
+docker build -t trust-participant-init:local init
+PARTICIPANT_INIT_IMAGE=trust-participant-init:local docker compose up -d
+```
 
 ## Network Model
 
@@ -70,6 +89,7 @@ Set:
 - `PARTICIPANT_DID_HOST` to the host used in the participant DID, usually the same as `PARTICIPANT_PUBLIC_HOST`.
 - `PUBLIC_DSP_CALLBACK_ADDRESS` to `https://${PARTICIPANT_PUBLIC_HOST}/api/v1/dsp`.
 - `PUBLIC_DATAPLANE_BASE_URL` to `https://${PARTICIPANT_PUBLIC_HOST}/api/public`.
+- `PUBLIC_CREDENTIAL_SERVICE_ENDPOINT` to `https://${PARTICIPANT_PUBLIC_HOST}/api/credentials/v1/participants/<bpn-base64>`.
 - `BDRS_SERVER_URL` to the trust operator BDRS directory URL.
 - `ISSUER_DID_HOST` and `BPN_ISSUER` to the trusted issuer DID host and BPN.
 
@@ -86,11 +106,13 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow publishes:
+The workflow publishes the Compose artifact and the init image:
 
 ```text
 ghcr.io/<owner>/<repo>:0.1.0
 ghcr.io/<owner>/<repo>:latest
+ghcr.io/<owner>/<repo>-init:0.1.0
+ghcr.io/<owner>/<repo>-init:latest
 ```
 
 Consumers can include the artifact with:
