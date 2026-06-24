@@ -329,15 +329,50 @@ volumes:
 
 configs:
   postgres-init:
-    file: ./config/postgres-init.sql
+    content: |
+      CREATE DATABASE participant_wallet;
+      CREATE DATABASE edc_participant;
   ih-logging:
-    file: ./config/ih-logging.properties
+    content: |
+      .level=INFO
+      org.eclipse.edc.level=INFO
   edc-logging:
-    file: ./config/edc-logging.properties
+    content: |
+      .level=INFO
+      org.eclipse.edc.level=INFO
   opentelemetry:
-    file: ./config/opentelemetry.properties
+    content: |
+      otel.sdk.disabled=true
   nginx-participant-edge:
-    file: ./config/nginx-participant-edge.conf
+    content: |
+      server {
+          listen 80;
+          server_name _;
+
+          location /api/v1/dsp/ {
+              proxy_pass http://${PARTICIPANT_ROLE:-participant}-controlplane:8084/api/v1/dsp/;
+              proxy_set_header Host $$host;
+              proxy_set_header X-Real-IP $$remote_addr;
+          }
+
+          location /api/public/ {
+              proxy_pass http://${PARTICIPANT_ROLE:-participant}-dataplane:8081/api/public/;
+              proxy_set_header Host $$host;
+              proxy_set_header X-Real-IP $$remote_addr;
+          }
+
+          location /.well-known/api/ {
+              proxy_pass http://${PARTICIPANT_ROLE:-participant}-controlplane:8085/.well-known/api/;
+              proxy_set_header Host $$host;
+              proxy_set_header X-Real-IP $$remote_addr;
+          }
+
+          location / {
+              proxy_pass http://${PARTICIPANT_ROLE:-participant}-identityhub:8084;
+              proxy_set_header Host $$host;
+              proxy_set_header X-Real-IP $$remote_addr;
+          }
+      }
 
 networks:
   internal:
