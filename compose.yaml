@@ -1,0 +1,348 @@
+name: ${COMPOSE_PROJECT_NAME:-trust-participant}
+
+x-java-env: &java-env
+  JAVA_TOOL_OPTIONS: "${JAVA_TOOL_OPTIONS:--Xmx256m}"
+  OTEL_SDK_DISABLED: "${OTEL_SDK_DISABLED:-true}"
+  OTEL_JAVAAGENT_ENABLED: "${OTEL_JAVAAGENT_ENABLED:-false}"
+
+services:
+  edge-network:
+    image: alpine:3.20
+    profiles: ["edge"]
+    command: ["sh", "-c", "true"]
+    networks:
+      edge: {}
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    configs:
+      - source: postgres-init
+        target: /docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      internal:
+        aliases:
+          - ${PARTICIPANT_ROLE:-participant}-postgres
+
+  wallet-vault:
+    image: hashicorp/vault:1.15
+    cap_add: [IPC_LOCK]
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN_ID:-root}
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+      VAULT_ADDR: "http://127.0.0.1:8200"
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      internal:
+        aliases:
+          - ${PARTICIPANT_ROLE:-participant}-wallet-vault
+
+  connector-vault:
+    image: hashicorp/vault:1.15
+    cap_add: [IPC_LOCK]
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN_ID:-root}
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+      VAULT_ADDR: "http://127.0.0.1:8200"
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      internal:
+        aliases:
+          - ${PARTICIPANT_ROLE:-participant}-connector-vault
+
+  vault-init:
+    image: hashicorp/vault:1.15
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        VAULT_ADDR=http://wallet-vault:8200 VAULT_TOKEN=${VAULT_DEV_ROOT_TOKEN_ID:-root} vault kv put secret/password content=password
+    depends_on:
+      wallet-vault:
+        condition: service_healthy
+      connector-vault:
+        condition: service_healthy
+    networks:
+      internal:
+        aliases:
+          - ${PARTICIPANT_ROLE:-participant}-vault-init
+
+  identityhub:
+    image: tractusx/identityhub:${IDENTITYHUB_TAG:-0.3.2}
+    configs:
+      - source: ih-logging
+        target: /app/logging.properties
+    environment:
+      <<: *java-env
+      WEB_HTTP_PORT: "8081"
+      WEB_HTTP_PATH: "/api"
+      WEB_HTTP_IDENTITY_PORT: "8082"
+      WEB_HTTP_IDENTITY_PATH: "/api/identity"
+      WEB_HTTP_IDENTITY_AUTH_ALIAS: "password"
+      WEB_HTTP_CREDENTIALS_PORT: "8083"
+      WEB_HTTP_CREDENTIALS_PATH: "/api/credentials"
+      WEB_HTTP_DID_PORT: "8084"
+      WEB_HTTP_DID_PATH: "/"
+      WEB_HTTP_ACCOUNTS_PORT: "8085"
+      WEB_HTTP_ACCOUNTS_PATH: "/api/accounts"
+      WEB_HTTP_VERSION_PORT: "8086"
+      WEB_HTTP_VERSION_PATH: "/.well-known/api"
+      WEB_HTTP_STS_PORT: "8087"
+      WEB_HTTP_STS_PATH: "/api/sts"
+      EDC_IAM_DID_WEB_USE_HTTPS: "${USE_HTTPS_DID_WEB:-true}"
+      EDC_IH_IAM_ID: "did:web:${PARTICIPANT_DID_HOST:-participant-did}:${PARTICIPANT_BPN:-BPNL00000003AYRE}"
+      EDC_IAM_ACCESSTOKEN_JTI_VALIDATION: "false"
+      EDC_IAM_CREDENTIAL_REVOCATION_MIMETYPE: "application/json"
+      EDC_ENCRYPTION_STRICT: "false"
+      EDC_VAULT_HASHICORP_URL: "http://wallet-vault:8200"
+      EDC_VAULT_HASHICORP_TOKEN: "${VAULT_DEV_ROOT_TOKEN_ID:-root}"
+      EDC_VAULT_HASHICORP_API_SECRET_PATH: "/v1/secret/data"
+      EDC_VAULT_HASHICORP_API_HEALTH_CHECK_PATH: "/v1/sys/health"
+      EDC_SQL_STORE_PARTICIPANTCONTEXT_DATASOURCE: "participantcontext"
+      EDC_SQL_STORE_KEYPAIR_DATASOURCE: "keypair"
+      EDC_SQL_STORE_DIDRESOURCE_DATASOURCE: "didresource"
+      EDC_SQL_STORE_STSCLIENT_DATASOURCE: "stsclient"
+      EDC_SQL_STORE_CREDENTIALREQUEST_DATASOURCE: "credentialrequest"
+      EDC_SQL_STORE_CREDENTIALS_DATASOURCE: "credentials"
+      EDC_SQL_STORE_JTI_DATASOURCE: "jti"
+      EDC_SQL_STORE_PARTICIPANTCONTEXTCONFIG_DATASOURCE: "participantcontextconfig"
+      EDC_DATASOURCE_DEFAULT_URL: "jdbc:postgresql://postgres:5432/participant_wallet"
+      EDC_DATASOURCE_DEFAULT_USER: "${POSTGRES_USER:-user}"
+      EDC_DATASOURCE_DEFAULT_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      EDC_DATASOURCE_PARTICIPANTCONTEXT_URL: "jdbc:postgresql://postgres:5432/participant_wallet"
+      EDC_DATASOURCE_PARTICIPANTCONTEXT_USER: "${POSTGRES_USER:-user}"
+      EDC_DATASOURCE_PARTICIPANTCONTEXT_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      EDC_DATASOURCE_KEYPAIR_URL: "jdbc:postgresql://postgres:5432/participant_wallet"
+      EDC_DATASOURCE_KEYPAIR_USER: "${POSTGRES_USER:-user}"
+      EDC_DATASOURCE_KEYPAIR_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      EDC_DATASOURCE_DIDRESOURCE_URL: "jdbc:postgresql://postgres:5432/participant_wallet"
+      EDC_DATASOURCE_DIDRESOURCE_USER: "${POSTGRES_USER:-user}"
+      EDC_DATASOURCE_DIDRESOURCE_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      EDC_DATASOURCE_STSCLIENT_URL: "jdbc:postgresql://postgres:5432/participant_wallet"
+      EDC_DATASOURCE_STSCLIENT_USER: "${POSTGRES_USER:-user}"
+      EDC_DATASOURCE_STSCLIENT_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      EDC_DATASOURCE_CREDENTIALREQUEST_URL: "jdbc:postgresql://postgres:5432/participant_wallet"
+      EDC_DATASOURCE_CREDENTIALREQUEST_USER: "${POSTGRES_USER:-user}"
+      EDC_DATASOURCE_CREDENTIALREQUEST_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      EDC_DATASOURCE_CREDENTIALS_URL: "jdbc:postgresql://postgres:5432/participant_wallet"
+      EDC_DATASOURCE_CREDENTIALS_USER: "${POSTGRES_USER:-user}"
+      EDC_DATASOURCE_CREDENTIALS_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      EDC_DATASOURCE_JTI_URL: "jdbc:postgresql://postgres:5432/participant_wallet"
+      EDC_DATASOURCE_JTI_USER: "${POSTGRES_USER:-user}"
+      EDC_DATASOURCE_JTI_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      EDC_DATASOURCE_PARTICIPANTCONTEXTCONFIG_URL: "jdbc:postgresql://postgres:5432/participant_wallet"
+      EDC_DATASOURCE_PARTICIPANTCONTEXTCONFIG_USER: "${POSTGRES_USER:-user}"
+      EDC_DATASOURCE_PARTICIPANTCONTEXTCONFIG_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+    ports:
+      - "127.0.0.1:${IDENTITYHUB_IDENTITY_HOST_PORT:-29282}:8082"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8081/api/check/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
+    networks:
+      internal:
+        aliases:
+          - ${PARTICIPANT_ROLE:-participant}-identityhub
+      edge:
+        aliases:
+          - ${PARTICIPANT_ROLE:-participant}-identityhub
+
+  controlplane:
+    image: tractusx/edc-controlplane-postgresql-hashicorp-vault:${TRACTUSX_EDC_TAG:-0.12.1}
+    configs:
+      - source: edc-logging
+        target: /app/logging.properties
+      - source: opentelemetry
+        target: /app/opentelemetry.properties
+    environment:
+      <<: *java-env
+      EDC_HOSTNAME: "controlplane"
+      EDC_PARTICIPANT_ID: "did:web:${PARTICIPANT_DID_HOST:-participant-did}:${PARTICIPANT_BPN:-BPNL00000003AYRE}"
+      EDC_PARTICIPANT_CONTEXT_ID: "${PARTICIPANT_CONTEXT_ID:-596b0330-76ec-5c8e-af01-24ba6a21d4e6}"
+      TRACTUSX_EDC_PARTICIPANT_BPN: "${PARTICIPANT_BPN:-BPNL00000003AYRE}"
+      EDC_IAM_ISSUER_ID: "did:web:${PARTICIPANT_DID_HOST:-participant-did}:${PARTICIPANT_BPN:-BPNL00000003AYRE}"
+      EDC_IAM_DID_WEB_USE_HTTPS: "${USE_HTTPS_DID_WEB:-true}"
+      EDC_IAM_CREDENTIAL_REVOCATION_MIMETYPE: "application/json"
+      EDC_IAM_STS_OAUTH_TOKEN_URL: "http://identityhub:8087/api/sts/token"
+      EDC_IAM_STS_OAUTH_CLIENT_ID: "did:web:${PARTICIPANT_DID_HOST:-participant-did}:${PARTICIPANT_BPN:-BPNL00000003AYRE}"
+      EDC_IAM_STS_OAUTH_CLIENT_SECRET_ALIAS: "sts-oauth-client-secret"
+      TX_EDC_IAM_IATP_CREDENTIALSERVICE_URL: "http://identityhub:8083/api/credentials/v1/participants/${PARTICIPANT_BPN_BASE64:-QlBOTDAwMDAwMDAzQVlSRQ==}"
+      TX_EDC_IAM_IATP_DEFAULT_SCOPES_MEMBERSHIP_ALIAS: "org.eclipse.tractusx.vc.type"
+      TX_EDC_IAM_IATP_DEFAULT_SCOPES_MEMBERSHIP_TYPE: "MembershipCredential"
+      TX_EDC_IAM_IATP_DEFAULT_SCOPES_MEMBERSHIP_OPERATION: "read"
+      TX_EDC_IAM_IATP_DEFAULT_SCOPES_DATAEXCHANGE_ALIAS: "org.eclipse.tractusx.vc.type"
+      TX_EDC_IAM_IATP_DEFAULT_SCOPES_DATAEXCHANGE_TYPE: "DataExchangeGovernanceCredential"
+      TX_EDC_IAM_IATP_DEFAULT_SCOPES_DATAEXCHANGE_OPERATION: "read"
+      EDC_DSP_CALLBACK_ADDRESS: "${PUBLIC_DSP_CALLBACK_ADDRESS:-http://controlplane:8084/api/v1/dsp}"
+      TX_EDC_IAM_IATP_BDRS_SERVER_URL: "${BDRS_SERVER_URL:-http://bdrs-server:8082/api/directory}"
+      TX_EDC_IAM_IATP_BDRS_CACHE_VALIDITY: "600"
+      TX_EDC_DID_SERVICE_SELF_REGISTRATION_ENABLED: "false"
+      "EDC_IAM_TRUSTED-ISSUER_0-ISSUER_ID": "did:web:${ISSUER_DID_HOST:-issuer-did}:${BPN_ISSUER:-BPNL00000003CRHK}"
+      "EDC_IAM_TRUSTED-ISSUER_0-ISSUER_SUPPORTEDTYPES": '["MembershipCredential","FrameworkCredential","BpnCredential","DataExchangeGovernanceCredential","DismantlerCredential"]'
+      WEB_HTTP_PORT: "8080"
+      WEB_HTTP_PATH: "/api"
+      WEB_HTTP_MANAGEMENT_PORT: "8081"
+      WEB_HTTP_MANAGEMENT_PATH: "/management"
+      WEB_HTTP_MANAGEMENT_AUTH_KEY: "${EDC_API_KEY:-password}"
+      WEB_HTTP_CATALOG_PORT: "8082"
+      WEB_HTTP_CATALOG_PATH: "/catalog"
+      WEB_HTTP_CONTROL_PORT: "8083"
+      WEB_HTTP_CONTROL_PATH: "/control"
+      WEB_HTTP_PROTOCOL_PORT: "8084"
+      WEB_HTTP_PROTOCOL_PATH: "/api/v1/dsp"
+      WEB_HTTP_VERSION_PORT: "8085"
+      WEB_HTTP_VERSION_PATH: "/.well-known/api"
+      EDC_DATASOURCE_DEFAULT_URL: "jdbc:postgresql://postgres:5432/edc_participant"
+      EDC_DATASOURCE_DEFAULT_USER: "${POSTGRES_USER:-user}"
+      EDC_DATASOURCE_DEFAULT_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      EDC_VAULT_HASHICORP_URL: "http://connector-vault:8200"
+      EDC_VAULT_HASHICORP_TOKEN: "${VAULT_DEV_ROOT_TOKEN_ID:-root}"
+      EDC_VAULT_HASHICORP_API_SECRET_PATH: "/v1/secret"
+    ports:
+      - "127.0.0.1:${CONTROLPLANE_MANAGEMENT_HOST_PORT:-29281}:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/api/check/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
+      identityhub:
+        condition: service_healthy
+    networks:
+      internal:
+        aliases:
+          - ${PARTICIPANT_ROLE:-participant}-controlplane
+      edge:
+        aliases:
+          - ${PARTICIPANT_ROLE:-participant}-controlplane
+
+  dataplane:
+    image: tractusx/edc-dataplane-hashicorp-vault:${TRACTUSX_EDC_TAG:-0.12.1}
+    configs:
+      - source: opentelemetry
+        target: /app/opentelemetry.properties
+    environment:
+      <<: *java-env
+      EDC_HOSTNAME: "dataplane"
+      EDC_PARTICIPANT_ID: "${PARTICIPANT_BPN:-BPNL00000003AYRE}"
+      EDC_PARTICIPANT_CONTEXT_ID: "${PARTICIPANT_CONTEXT_ID:-596b0330-76ec-5c8e-af01-24ba6a21d4e6}"
+      EDC_IAM_ISSUER_ID: "did:web:${PARTICIPANT_DID_HOST:-participant-did}:${PARTICIPANT_BPN:-BPNL00000003AYRE}"
+      EDC_IAM_DID_WEB_USE_HTTPS: "${USE_HTTPS_DID_WEB:-true}"
+      EDC_IAM_CREDENTIAL_REVOCATION_MIMETYPE: "application/json"
+      EDC_IAM_STS_OAUTH_TOKEN_URL: "http://identityhub:8087/api/sts/token"
+      EDC_IAM_STS_OAUTH_CLIENT_ID: "did:web:${PARTICIPANT_DID_HOST:-participant-did}:${PARTICIPANT_BPN:-BPNL00000003AYRE}"
+      EDC_IAM_STS_OAUTH_CLIENT_SECRET_ALIAS: "sts-oauth-client-secret"
+      WEB_HTTP_PORT: "8080"
+      WEB_HTTP_PATH: "/api"
+      WEB_HTTP_PUBLIC_PORT: "8081"
+      WEB_HTTP_PUBLIC_PATH: "/api/public"
+      WEB_HTTP_CONTROL_PORT: "8083"
+      WEB_HTTP_CONTROL_PATH: "/api/dataplane/control"
+      WEB_HTTP_VERSION_PORT: "8084"
+      WEB_HTTP_VERSION_PATH: "/.well-known/api"
+      EDC_DATAPLANE_API_PUBLIC_BASEURL: "${PUBLIC_DATAPLANE_BASE_URL:-http://dataplane:8081/api/public}"
+      EDC_TRANSFER_PROXY_TOKEN_SIGNER_PRIVATEKEY_ALIAS: "token-signer-key"
+      EDC_TRANSFER_PROXY_TOKEN_VERIFIER_PUBLICKEY_ALIAS: "token-signer-key"
+      EDC_DPF_SELECTOR_URL: "http://controlplane:8083/control/v1/dataplanes"
+      EDC_DATASOURCE_DEFAULT_URL: "jdbc:postgresql://postgres:5432/edc_participant"
+      EDC_DATASOURCE_DEFAULT_USER: "${POSTGRES_USER:-user}"
+      EDC_DATASOURCE_DEFAULT_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      EDC_VAULT_HASHICORP_URL: "http://connector-vault:8200"
+      EDC_VAULT_HASHICORP_TOKEN: "${VAULT_DEV_ROOT_TOKEN_ID:-root}"
+      EDC_VAULT_HASHICORP_API_SECRET_PATH: "/v1/secret"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/api/check/startup || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
+      controlplane:
+        condition: service_healthy
+    networks:
+      internal:
+        aliases:
+          - ${PARTICIPANT_ROLE:-participant}-dataplane
+      edge:
+        aliases:
+          - ${PARTICIPANT_ROLE:-participant}-dataplane
+
+  edge:
+    image: nginx:alpine
+    configs:
+      - source: nginx-participant-edge
+        target: /etc/nginx/conf.d/default.conf
+    ports:
+      - "${PUBLIC_HTTP_BIND:-127.0.0.1}:${PUBLIC_HTTP_HOST_PORT:-8080}:80"
+    depends_on:
+      identityhub:
+        condition: service_healthy
+      controlplane:
+        condition: service_healthy
+      dataplane:
+        condition: service_healthy
+    networks:
+      internal:
+        aliases:
+          - ${PARTICIPANT_ROLE:-participant}-did
+      edge:
+        aliases:
+          - ${PARTICIPANT_DID_HOST:-participant-did}
+          - ${PARTICIPANT_ROLE:-participant}-did
+
+volumes:
+  postgres-data:
+
+configs:
+  postgres-init:
+    file: ./config/postgres-init.sql
+  ih-logging:
+    file: ./config/ih-logging.properties
+  edc-logging:
+    file: ./config/edc-logging.properties
+  opentelemetry:
+    file: ./config/opentelemetry.properties
+  nginx-participant-edge:
+    file: ./config/nginx-participant-edge.conf
+
+networks:
+  internal:
+    name: ${COMPOSE_PROJECT_PREFIX:-trust}-${PARTICIPANT_ROLE:-participant}-internal
+    internal: true
+  edge:
+    name: ${TRUST_PARTICIPANT_EDGE_NETWORK:-trust-edge}
+    external: ${TRUST_PARTICIPANT_EDGE_NETWORK_EXTERNAL:-false}
