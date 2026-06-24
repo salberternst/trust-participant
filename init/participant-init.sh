@@ -10,10 +10,6 @@ fail() {
     exit 1
 }
 
-urlencode() {
-    jq -nr --arg value "$1" '$value | @uri'
-}
-
 wait_for_http() {
     name="$1"
     url="$2"
@@ -70,16 +66,22 @@ wait_vault_get() {
     return 1
 }
 
-wait_vault_get_first() {
+wait_vault_get_any() {
     vault_addr="$1"
-    shift
+    attempts="$2"
+    shift 2
+    i=0
 
-    for key in "$@"; do
-        value="$(wait_vault_get "$vault_addr" "$key" 2>/dev/null || true)"
-        if [ -n "$value" ] && [ "$value" != "null" ]; then
-            printf '%s' "$value"
-            return 0
-        fi
+    while [ "$i" -lt "$attempts" ]; do
+        for key in "$@"; do
+            value="$(vault_get "$vault_addr" "$key" 2>/dev/null || true)"
+            if [ -n "$value" ] && [ "$value" != "null" ]; then
+                printf '%s' "$value"
+                return 0
+            fi
+        done
+        i=$((i + 1))
+        sleep 2
     done
 
     return 1
@@ -126,7 +128,7 @@ IDENTITYHUB_CONTEXT_ID="${IDENTITYHUB_PARTICIPANT_CONTEXT_ID:-$PARTICIPANT_BPN}"
 PARTICIPANT_DID_HOST="${PARTICIPANT_DID_HOST:-participant.external.test}"
 PARTICIPANT_PUBLIC_HOST="${PARTICIPANT_PUBLIC_HOST:-$PARTICIPANT_DID_HOST}"
 PARTICIPANT_DID="did:web:${PARTICIPANT_DID_HOST}:${PARTICIPANT_BPN}"
-PARTICIPANT_KEY_ALIAS="${IDENTITYHUB_KEY_ALIAS:-${PARTICIPANT_BPN}-key-1}"
+PARTICIPANT_KEY_ALIAS="${PARTICIPANT_BPN}-key-1"
 
 IDENTITYHUB_IDENTITY_URL="${IDENTITYHUB_IDENTITY_URL:-http://identityhub:8082/api/identity}"
 IDENTITYHUB_HEALTH_URL="${IDENTITYHUB_HEALTH_URL:-http://identityhub:8081/api/check/health}"
@@ -189,16 +191,16 @@ case "$status" in
     *) printf '%s\n' "$body" >&2; fail "participant context creation failed with HTTP ${status}" ;;
 esac
 
-log "IdentityHub participant context active state requested"
+log "IdentityHub participant context requested as active"
 
 log "Syncing participant STS and token signer secrets to connector Vault"
-sts_secret="$(wait_vault_get_first \
-    "$WALLET_VAULT_ADDR" \
+sts_secret="$(wait_vault_get_any \
+    "$WALLET_VAULT_ADDR" 60 \
     "${IDENTITYHUB_CONTEXT_ID}-sts-client-secret" \
     "${PARTICIPANT_BPN}-sts-client-secret")" ||
     fail "STS client secret unavailable in wallet Vault"
-participant_key="$(wait_vault_get_first \
-    "$WALLET_VAULT_ADDR" \
+participant_key="$(wait_vault_get_any \
+    "$WALLET_VAULT_ADDR" 60 \
     "$PARTICIPANT_KEY_ALIAS" \
     "${IDENTITYHUB_CONTEXT_ID}-key-1" \
     "${PARTICIPANT_BPN}-key-1")" ||
