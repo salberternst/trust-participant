@@ -101,7 +101,45 @@ The internal gateway routes `/` to `portal-gateway`. That service automatically 
 
 The portal is internal-only by default. It is not connected to the public gateway and does not bind its own host port.
 
-For local portal-gateway image development:
+## Development
+
+Use the dev scripts for participant-only testing without the rest of the semantic-dataspace stack:
+
+```sh
+tools/scripts/dev-up.sh
+tools/scripts/dev-down.sh
+tools/scripts/dev-down.sh -v
+```
+
+`dev-up.sh` uses `dev/compose.hot-reload.yaml`, disables onboarding auto-submit by default, mounts `portal-gateway`, and runs the Node API plus Vite dev server in the gateway container. It installs npm dependencies into a Docker volume and reruns `npm ci` when `package-lock.json` changes. Set `DEV_ONBOARDING_AUTO_SUBMIT=true` when a dataspace-admin API is reachable.
+
+Open the hot-reload UI at:
+
+```text
+http://localhost:5174
+```
+
+The same UI is also available through the internal gateway, with API calls routed back to the gateway server:
+
+```text
+http://localhost:8081
+```
+
+Useful local checks:
+
+```sh
+curl -H 'Host: portal.internal.test' http://127.0.0.1:8081/health
+curl -H 'Host: portal.internal.test' http://127.0.0.1:8081/api/onboarding/state | jq .
+```
+
+To test the local portal handoff without dataspace-admin, mark the onboarding state and open the gateway API server directly at `http://localhost:3000`:
+
+```sh
+tools/scripts/dev-mark-onboarded.sh
+tools/scripts/dev-reset-onboarding.sh
+```
+
+With the hot-reload override, `/` on ports `5174` and `8081` is intentionally served by Vite so UI changes update immediately. To test the production gateway image path, build the local image and run the normal compose file:
 
 ```sh
 cd portal-gateway
