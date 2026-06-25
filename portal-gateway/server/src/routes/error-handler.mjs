@@ -1,4 +1,4 @@
-export function errorHandler(error, req, res, next) {
+export function errorHandler(error, req, res, _next) {
   const status = Number.isInteger(error.status) && error.status >= 400 ? error.status : 500
   if (status >= 500) console.error(error)
   res.status(status).json({

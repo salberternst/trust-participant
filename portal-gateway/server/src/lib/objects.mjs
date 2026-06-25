@@ -16,9 +16,7 @@ export function parsePayload(value) {
 }
 
 export function pruneUndefined(value) {
-  return Object.fromEntries(
-    Object.entries(value).filter(([, entry]) => entry !== undefined),
-  )
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined))
 }
 
 export function text(value, fallback = '') {

@@ -6,10 +6,14 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL ?? buildDatabaseUrl(),
   portalUpstreamUrl: trimTrailingSlash(process.env.PORTAL_UPSTREAM_URL ?? 'http://portal:80'),
   dataspaceAdminApiUrl: trimTrailingSlash(
-    process.env.ONBOARDING_DATASPACE_ADMIN_API_URL ?? process.env.DATASPACE_ADMIN_API_URL ?? 'http://dataspace-admin:3000/api',
+    process.env.ONBOARDING_DATASPACE_ADMIN_API_URL ??
+      process.env.DATASPACE_ADMIN_API_URL ??
+      'http://dataspace-admin:3000/api',
   ),
   identityHub: {
-    identityApiUrl: trimTrailingSlash(process.env.IDENTITYHUB_IDENTITY_API_URL ?? 'http://identityhub:8082/api/identity'),
+    identityApiUrl: trimTrailingSlash(
+      process.env.IDENTITYHUB_IDENTITY_API_URL ?? 'http://identityhub:8082/api/identity',
+    ),
     participantContextId: process.env.IDENTITYHUB_PARTICIPANT_CONTEXT_ID ?? process.env.PARTICIPANT_BPN ?? '',
     participantContextPathId: process.env.IDENTITYHUB_PARTICIPANT_CONTEXT_PATH_ID ?? '',
     apiKey: process.env.IDENTITYHUB_API_KEY ?? '',
@@ -21,7 +25,6 @@ export const config = {
   stateId: 'default',
   onboardingAutoSubmit: process.env.ONBOARDING_AUTO_SUBMIT !== 'false',
 }
-
 
 export function onboardingDefaults() {
   return {

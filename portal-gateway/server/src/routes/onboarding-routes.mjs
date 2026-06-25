@@ -1,5 +1,10 @@
 import { Router } from 'express'
-import { buildStateResponse, createOnboardingCase, refreshOnboarding, requestCredentials } from '../services/onboarding-service.mjs'
+import {
+  buildStateResponse,
+  createOnboardingCase,
+  refreshOnboarding,
+  requestCredentials,
+} from '../services/onboarding-service.mjs'
 
 export const onboardingRouter = Router()
 

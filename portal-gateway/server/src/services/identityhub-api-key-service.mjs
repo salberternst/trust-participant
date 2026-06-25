@@ -10,9 +10,7 @@ export async function getIdentityHubApiKey() {
 
   try {
     const payload = await fetchVaultSecret(config.identityHub.apiKeyVaultPath)
-    const content = isRecord(payload)
-      ? payload.data?.data?.content ?? payload.data?.content ?? payload.content
-      : ''
+    const content = isRecord(payload) ? (payload.data?.data?.content ?? payload.data?.content ?? payload.content) : ''
     cachedIdentityHubApiKey = typeof content === 'string' ? content : ''
     return cachedIdentityHubApiKey
   } catch (error) {

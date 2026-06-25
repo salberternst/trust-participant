@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 
@@ -86,8 +86,11 @@ declare global {
 
 const portalConfig = window.config ?? {}
 const storageKeys = {
-  language: 'trust-participant.portal-gateway.language',
-  theme: 'trust-participant.portal-gateway.theme',
+  locale: 'locale',
+  legacyLanguage: 'trust-participant.portal-gateway.language',
+  legacyTheme: 'trust-participant.portal-gateway.theme',
+  raLocale: 'RaStore.locale',
+  raTheme: 'RaStore.theme',
 }
 
 const fallbackThemes: Record<ThemeMode, PortalThemeMode> = {
@@ -103,14 +106,14 @@ const fallbackThemes: Record<ThemeMode, PortalThemeMode> = {
   },
   dark: {
     palette: {
-      primary: { main: '#82aaff', light: '#dbe7ff' },
-      secondary: { main: '#70e0c8' },
-      background: { default: '#111318', paper: '#191c22' },
-      text: { primary: '#f3f5f7', secondary: '#aeb5c0' },
-      error: { main: '#ff6b6b' },
-      warning: { main: '#f6bd60' },
-      info: { main: '#64d2ff' },
-      success: { main: '#63d471' },
+      primary: { main: '#9055fd' },
+      secondary: { main: '#FF83F6' },
+      background: { default: '#110e1c', paper: '#151221' },
+      text: { primary: '#f3f0ff', secondary: '#c5bdd8' },
+      error: { main: '#E53935' },
+      warning: { main: '#FFB74D' },
+      info: { main: '#29B6F6' },
+      success: { main: '#66BB6A' },
     },
     shape: { borderRadius: 0 },
     spacing: 10,
@@ -143,7 +146,8 @@ const copy = {
     onboardingRequestSent: 'Onboarding request sent.',
     operatorApproval: 'Operator approval',
     operatorApproved: 'The operator has approved the participant request.',
-    operatorApprovedStatus: 'The operator has approved the request. The gateway is completing credential setup automatically.',
+    operatorApprovedStatus:
+      'The operator has approved the request. The gateway is completing credential setup automatically.',
     operatorState: 'Operator state',
     organization: 'Organization',
     participantAccess: 'Participant access',
@@ -168,14 +172,18 @@ const copy = {
     technicalConnectionDetails: 'Technical connection details',
     technicalDetails: 'Technical details',
     theme: 'Theme',
+    toggleTheme: 'Toggle Theme',
     type: 'Type',
     updated: 'Updated',
-    valuesFromConfig: 'These values come from the participant deployment configuration and are submitted to the operator.',
+    valuesFromConfig:
+      'These values come from the participant deployment configuration and are submitted to the operator.',
     waitingForOperator: 'Waiting for the operator to review and approve the request.',
-    waitingForOperatorStatus: 'Your request is with the operator. This page refreshes regularly and will continue automatically after approval.',
+    waitingForOperatorStatus:
+      'Your request is with the operator. This page refreshes regularly and will continue automatically after approval.',
     readyForPortal: 'Ready for the portal',
     readyStatus: 'Your participant has been activated. The gateway will now open the normal portal.',
-    requestSubmissionDisabledStatus: 'Automatic request submission is disabled. Send the configured request to start onboarding.',
+    requestSubmissionDisabledStatus:
+      'Automatic request submission is disabled. Send the configured request to start onboarding.',
     requestSubmissionStatus: 'The gateway is sending the configured participant request to the operator.',
     requestingCredentials: 'The gateway is requesting credentials and checking IdentityHub.',
   },
@@ -204,7 +212,8 @@ const copy = {
     onboardingRequestSent: 'Onboarding-Anfrage gesendet.',
     operatorApproval: 'Betreiberfreigabe',
     operatorApproved: 'Der Betreiber hat die Teilnehmeranfrage freigegeben.',
-    operatorApprovedStatus: 'Der Betreiber hat die Anfrage freigegeben. Das Gateway schließt die Credential-Einrichtung automatisch ab.',
+    operatorApprovedStatus:
+      'Der Betreiber hat die Anfrage freigegeben. Das Gateway schließt die Credential-Einrichtung automatisch ab.',
     operatorState: 'Betreiberstatus',
     organization: 'Organisation',
     participantAccess: 'Teilnehmerzugang',
@@ -229,14 +238,17 @@ const copy = {
     technicalConnectionDetails: 'Technische Verbindungsdaten',
     technicalDetails: 'Technische Details',
     theme: 'Theme',
+    toggleTheme: 'Theme wechseln',
     type: 'Typ',
     updated: 'Aktualisiert',
     valuesFromConfig: 'Diese Werte stammen aus der Teilnehmerkonfiguration und werden an den Betreiber gesendet.',
     waitingForOperator: 'Warten auf Prüfung und Freigabe durch den Betreiber.',
-    waitingForOperatorStatus: 'Deine Anfrage liegt beim Betreiber. Diese Seite aktualisiert sich regelmäßig und fährt nach der Freigabe automatisch fort.',
+    waitingForOperatorStatus:
+      'Deine Anfrage liegt beim Betreiber. Diese Seite aktualisiert sich regelmäßig und fährt nach der Freigabe automatisch fort.',
     readyForPortal: 'Bereit für das Portal',
     readyStatus: 'Dein Teilnehmer wurde aktiviert. Das Gateway öffnet jetzt das normale Portal.',
-    requestSubmissionDisabledStatus: 'Automatische Anfrageübermittlung ist deaktiviert. Sende die konfigurierte Anfrage, um das Onboarding zu starten.',
+    requestSubmissionDisabledStatus:
+      'Automatische Anfrageübermittlung ist deaktiviert. Sende die konfigurierte Anfrage, um das Onboarding zu starten.',
     requestSubmissionStatus: 'Das Gateway sendet die konfigurierte Teilnehmeranfrage an den Betreiber.',
     requestingCredentials: 'Das Gateway fordert Credentials an und prüft die lokale IdentityHub.',
   },
@@ -278,13 +290,36 @@ function App() {
   useEffect(() => {
     applyPortalTheme(portalTheme)
     document.documentElement.dataset.theme = themeMode
-    writeStorage(storageKeys.theme, themeMode)
+    writeJsonStorage(storageKeys.raTheme, themeMode)
   }, [portalTheme, themeMode])
 
   useEffect(() => {
     document.documentElement.lang = language
-    writeStorage(storageKeys.language, language)
+    writeStorage(storageKeys.locale, language)
+    writeJsonStorage(storageKeys.raLocale, language)
   }, [language])
+
+  const refreshState = useCallback(
+    async (showMessage = true) => {
+      setBusy((current) => current || 'state')
+      try {
+        const next = await api<GatewayState>('/api/onboarding/state')
+        setState(next)
+        if (showMessage) {
+          setMessage({
+            tone: next.onboarded ? 'ok' : 'info',
+            text: next.onboarded ? t.portalOpening : t.statusRefreshed,
+          })
+        }
+        if (next.onboarded) window.setTimeout(() => window.location.assign('/'), 600)
+      } catch (error) {
+        setMessage({ tone: 'error', text: getErrorMessage(error) })
+      } finally {
+        setBusy('')
+      }
+    },
+    [t],
+  )
 
   useEffect(() => {
     refreshState(false)
@@ -292,21 +327,7 @@ function App() {
       if (!document.hidden) refreshState(false)
     }, 5000)
     return () => window.clearInterval(interval)
-  }, [])
-
-  async function refreshState(showMessage = true) {
-    setBusy((current) => current || 'state')
-    try {
-      const next = await api<GatewayState>('/api/onboarding/state')
-      setState(next)
-      if (showMessage) setMessage({ tone: next.onboarded ? 'ok' : 'info', text: next.onboarded ? t.portalOpening : t.statusRefreshed })
-      if (next.onboarded) window.setTimeout(() => window.location.assign('/'), 600)
-    } catch (error) {
-      setMessage({ tone: 'error', text: getErrorMessage(error) })
-    } finally {
-      setBusy('')
-    }
-  }
+  }, [refreshState])
 
   async function sendRequest() {
     if (!state) return
@@ -342,7 +363,11 @@ function App() {
   }
 
   if (!state) {
-    return <main className="shell"><div className="panel">{t.loading}</div></main>
+    return (
+      <main className="shell">
+        <div className="panel">{t.loading}</div>
+      </main>
+    )
   }
 
   const caseData = state.case
@@ -366,25 +391,22 @@ function App() {
           <span>{portalConfig.title || t.portal}</span>
         </div>
         <div className="topbar-actions" aria-label={t.preferences}>
-          <SegmentedControl
-            label={t.theme}
-            value={themeMode}
-            options={[
-              { value: 'light', label: t.light },
-              { value: 'dark', label: t.dark },
-            ]}
-            onChange={setThemeMode}
+          <LocaleMenuButton language={language} onChange={setLanguage} />
+          <ThemeToggleButton
+            themeMode={themeMode}
+            label={t.toggleTheme}
+            onToggle={() => setThemeMode(themeMode === 'dark' ? 'light' : 'dark')}
           />
-          <SegmentedControl
-            label={t.language}
-            value={language}
-            options={[
-              { value: 'en', label: 'EN' },
-              { value: 'de', label: 'DE' },
-            ]}
-            onChange={setLanguage}
-          />
-          <button type="button" className="button-secondary" onClick={() => refreshState()} disabled={isBusy}>{t.refresh}</button>
+          <button
+            type="button"
+            className="appbar-icon-button"
+            title={t.refresh}
+            aria-label={t.refresh}
+            onClick={() => refreshState()}
+            disabled={isBusy}
+          >
+            <RefreshIcon />
+          </button>
         </div>
       </section>
 
@@ -426,10 +448,24 @@ function App() {
           </details>
 
           <div className="actions">
-            {!state.caseId && <button type="button" onClick={sendRequest} disabled={isBusy}>{state.autoSubmit ? t.retryRequest : t.sendRequest}</button>}
-            {state.caseId && !state.onboarded && <button type="button" onClick={() => refreshState()} disabled={isBusy}>{t.checkNow}</button>}
-            {canRetryCredentials && <button type="button" onClick={retryCredentialSetup} disabled={isBusy}>{t.retryCredentialSetup}</button>}
-            <button type="button" className="button-secondary" onClick={() => refreshState()} disabled={isBusy}>{t.refreshStatus}</button>
+            {!state.caseId && (
+              <button type="button" onClick={sendRequest} disabled={isBusy}>
+                {state.autoSubmit ? t.retryRequest : t.sendRequest}
+              </button>
+            )}
+            {state.caseId && !state.onboarded && (
+              <button type="button" onClick={() => refreshState()} disabled={isBusy}>
+                {t.checkNow}
+              </button>
+            )}
+            {canRetryCredentials && (
+              <button type="button" onClick={retryCredentialSetup} disabled={isBusy}>
+                {t.retryCredentialSetup}
+              </button>
+            )}
+            <button type="button" className="button-secondary" onClick={() => refreshState()} disabled={isBusy}>
+              {t.refreshStatus}
+            </button>
           </div>
         </section>
 
@@ -438,7 +474,9 @@ function App() {
             <h2>{t.setupProgress}</h2>
           </div>
           <div className="steps">
-            {setupSteps.map((step) => <StepItem key={step.label} {...step} />)}
+            {setupSteps.map((step) => (
+              <StepItem key={step.label} {...step} />
+            ))}
           </div>
           <div className="summary-list">
             <Info label={t.operatorState} value={displayState(caseData?.state || state.state, language)} />
@@ -465,7 +503,11 @@ function App() {
         </div>
         {state.credentials.length > 0 && (
           <div className="table">
-            <div className="row heading"><span>{t.type}</span><span>{t.issuer}</span><span>{t.operatorState}</span></div>
+            <div className="row heading">
+              <span>{t.type}</span>
+              <span>{t.issuer}</span>
+              <span>{t.operatorState}</span>
+            </div>
             {state.credentials.map((credential) => (
               <div className="row" key={credential.id}>
                 <span>{credential.type}</span>
@@ -480,29 +522,138 @@ function App() {
   )
 }
 
-function SegmentedControl<T extends string>(props: {
-  label: string
-  value: T
-  options: Array<{ value: T; label: string }>
-  onChange: (value: T) => void
-}) {
+const languageOptions: Array<{ value: Language; label: string }> = [
+  { value: 'en', label: 'English' },
+  { value: 'de', label: 'Deutsch' },
+]
+
+function LocaleMenuButton(props: { language: Language; onChange: (language: Language) => void }) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLSpanElement>(null)
+  const current = languageOptions.find((option) => option.value === props.language) ?? languageOptions[0]
+
+  useEffect(() => {
+    if (!open) return undefined
+
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false)
+    }
+
+    document.addEventListener('mousedown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [open])
+
   return (
-    <div className="segmented" role="group" aria-label={props.label}>
-      <span className="segmented-label">{props.label}</span>
-      <div className="segmented-buttons">
-        {props.options.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            className={option.value === props.value ? 'active' : ''}
-            aria-pressed={option.value === props.value}
-            onClick={() => props.onChange(option.value)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-    </div>
+    <span className="locale-menu" ref={rootRef}>
+      <button
+        type="button"
+        className="locale-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <TranslateIcon />
+        <span>{current.label}</span>
+        <ExpandMoreIcon />
+      </button>
+      {open && (
+        <span className="locale-popover" role="menu">
+          {languageOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="menuitemradio"
+              aria-checked={option.value === props.language}
+              className={option.value === props.language ? 'selected' : ''}
+              onClick={() => {
+                props.onChange(option.value)
+                setOpen(false)
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function ThemeToggleButton(props: { themeMode: ThemeMode; label: string; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      className="appbar-icon-button"
+      title={props.label}
+      aria-label={props.label}
+      onClick={props.onToggle}
+    >
+      {props.themeMode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
+    </button>
+  )
+}
+
+function TranslateIcon() {
+  return (
+    <svg className="control-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 5h10" />
+      <path d="M9 3v2" />
+      <path d="M6 9c1.1 2.2 2.9 3.8 5.4 4.8" />
+      <path d="M12 5c-.6 3.4-2.6 6.2-6 8.4" />
+      <path d="M13 19l4-9 4 9" />
+      <path d="M14.4 16h5.2" />
+    </svg>
+  )
+}
+
+function ExpandMoreIcon() {
+  return (
+    <svg className="control-icon small" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m7 10 5 5 5-5" />
+    </svg>
+  )
+}
+
+function Brightness4Icon() {
+  return (
+    <svg className="control-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M21 13.3A7.7 7.7 0 0 1 10.7 3a8.8 8.8 0 1 0 10.3 10.3Z" />
+    </svg>
+  )
+}
+
+function Brightness7Icon() {
+  return (
+    <svg className="control-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2" />
+      <path d="M12 20v2" />
+      <path d="m4.9 4.9 1.4 1.4" />
+      <path d="m17.7 17.7 1.4 1.4" />
+      <path d="M2 12h2" />
+      <path d="M20 12h2" />
+      <path d="m4.9 19.1 1.4-1.4" />
+      <path d="m17.7 6.3 1.4-1.4" />
+    </svg>
+  )
+}
+
+function RefreshIcon() {
+  return (
+    <svg className="control-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M20 11a8.1 8.1 0 0 0-14.2-4.9L4 8" />
+      <path d="M4 4v4h4" />
+      <path d="M4 13a8.1 8.1 0 0 0 14.2 4.9L20 16" />
+      <path d="M20 20v-4h-4" />
+    </svg>
   )
 }
 
@@ -517,7 +668,11 @@ function Info(props: { label: string; value: string; mono?: boolean }) {
 
 function StatusBadge(props: { state: GatewayState; language: Language }) {
   const tone = props.state.onboarded ? 'ok' : props.state.caseId ? 'pending' : 'idle'
-  return <span className={`status status-${tone}`}>{displayState(props.state.onboarded ? 'ACTIVE' : props.state.state, props.language)}</span>
+  return (
+    <span className={`status status-${tone}`}>
+      {displayState(props.state.onboarded ? 'ACTIVE' : props.state.state, props.language)}
+    </span>
+  )
 }
 
 function StepItem(props: { label: string; detail: string; state: 'done' | 'active' | 'waiting' }) {
@@ -540,7 +695,8 @@ function buildParticipantDetails(state: GatewayState) {
     requestedBpn: caseData.requestedBpn || defaults.requestedBpn,
     did: caseData.did || defaults.did,
     dspEndpoint: caseData.dspEndpoint || defaults.dspEndpoint,
-    identityHubCredentialServiceEndpoint: caseData.identityHubCredentialServiceEndpoint || defaults.identityHubCredentialServiceEndpoint,
+    identityHubCredentialServiceEndpoint:
+      caseData.identityHubCredentialServiceEndpoint || defaults.identityHubCredentialServiceEndpoint,
     contactEmail: caseData.contactEmail || defaults.contactEmail,
     requestedRole: caseData.requestedRole || defaults.requestedRole,
   }
@@ -554,11 +710,7 @@ function buildSetupSteps(state: GatewayState, t: UiCopy) {
   return [
     {
       label: t.requestSent,
-      detail: requestDone
-        ? t.submittedMetadata
-        : state.autoSubmit
-          ? t.submittingMetadata
-          : t.autoSubmissionDisabled,
+      detail: requestDone ? t.submittedMetadata : state.autoSubmit ? t.submittingMetadata : t.autoSubmissionDisabled,
       state: requestDone ? 'done' : 'active',
     },
     {
@@ -568,11 +720,7 @@ function buildSetupSteps(state: GatewayState, t: UiCopy) {
     },
     {
       label: t.credentialsAndAccess,
-      detail: accessDone
-        ? t.credentialsIssued
-        : approved
-          ? t.requestingCredentials
-          : t.credentialSetupAutomatic,
+      detail: accessDone ? t.credentialsIssued : approved ? t.requestingCredentials : t.credentialSetupAutomatic,
       state: accessDone ? 'done' : approved ? 'active' : 'waiting',
     },
   ] as Array<{ label: string; detail: string; state: 'done' | 'active' | 'waiting' }>
@@ -580,7 +728,9 @@ function buildSetupSteps(state: GatewayState, t: UiCopy) {
 
 function isApproved(state: GatewayState) {
   const caseState = state.case?.state || state.state || ''
-  return ['READY_FOR_PARTICIPANT', 'CREDENTIALS_REQUESTED', 'ACTIVE', 'ONBOARDED'].includes(caseState) || state.onboarded
+  return (
+    ['READY_FOR_PARTICIPANT', 'CREDENTIALS_REQUESTED', 'ACTIVE', 'ONBOARDED'].includes(caseState) || state.onboarded
+  )
 }
 
 function statusDescription(state: GatewayState, t: UiCopy) {
@@ -593,10 +743,13 @@ function statusDescription(state: GatewayState, t: UiCopy) {
 
 function displayState(value: string, language: Language) {
   const key = value.toUpperCase()
-  return localizedStates[language][key] ?? value
-    .replace(/_/g, ' ')
-    .toLowerCase()
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+  return (
+    localizedStates[language][key] ??
+    value
+      .replace(/_/g, ' ')
+      .toLowerCase()
+      .replace(/\b\w/g, (letter) => letter.toUpperCase())
+  )
 }
 
 function formatTimestamp(value: string | undefined, language: Language) {
@@ -620,13 +773,14 @@ function getErrorMessage(error: unknown) {
 }
 
 function initialLanguage(): Language {
-  const stored = readStorage(storageKeys.language)
+  const stored =
+    readJsonStorage(storageKeys.raLocale) ?? readStorage(storageKeys.locale) ?? readStorage(storageKeys.legacyLanguage)
   if (stored === 'en' || stored === 'de') return stored
   return window.navigator.language.toLowerCase().startsWith('de') ? 'de' : 'en'
 }
 
 function initialThemeMode(): ThemeMode {
-  const stored = readStorage(storageKeys.theme)
+  const stored = readJsonStorage(storageKeys.raTheme) ?? readStorage(storageKeys.legacyTheme)
   if (stored === 'light' || stored === 'dark') return stored
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
@@ -639,9 +793,27 @@ function readStorage(key: string) {
   }
 }
 
+function readJsonStorage(key: string) {
+  const value = readStorage(key)
+  if (!value) return null
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}
+
 function writeStorage(key: string, value: string) {
   try {
     window.localStorage.setItem(key, value)
+  } catch {
+    // Ignore private-mode and locked-down browser storage failures.
+  }
+}
+
+function writeJsonStorage(key: string, value: string) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value))
   } catch {
     // Ignore private-mode and locked-down browser storage failures.
   }
@@ -728,9 +900,13 @@ function colorMix(foreground: string, background: string, backgroundWeight: numb
 
 function hexToRgb(color: string) {
   const normalized = color.trim().replace('#', '')
-  const hex = normalized.length === 3
-    ? normalized.split('').map((value) => value + value).join('')
-    : normalized
+  const hex =
+    normalized.length === 3
+      ? normalized
+          .split('')
+          .map((value) => value + value)
+          .join('')
+      : normalized
   if (!/^[\da-f]{6}$/i.test(hex)) return null
   const value = Number.parseInt(hex, 16)
   return {

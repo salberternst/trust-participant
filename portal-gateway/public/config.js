@@ -1,39 +1,39 @@
 window.config = window.config || {
-  title: "Portal",
+  title: 'Portal',
   theme: {
     light: {
       palette: {
-        primary: { main: "#0043ce" },
-        secondary: { main: "#1D49B8" },
-        background: { default: "#ffffff", paper: "#ffffff" },
+        primary: { main: '#0043ce' },
+        secondary: { main: '#1D49B8' },
+        background: { default: '#ffffff', paper: '#ffffff' },
         text: {
-          primary: "#544f5a",
-          secondary: "#89868D"
-        }
+          primary: '#544f5a',
+          secondary: '#89868D',
+        },
       },
       shape: {
-        borderRadius: 0
+        borderRadius: 0,
       },
-      spacing: 10
+      spacing: 10,
     },
     dark: {
       palette: {
-        primary: { main: "#82aaff", light: "#dbe7ff" },
-        secondary: { main: "#70e0c8" },
-        background: { default: "#111318", paper: "#191c22" },
+        primary: { main: '#9055fd' },
+        secondary: { main: '#FF83F6' },
+        background: { default: '#110e1c', paper: '#151221' },
         text: {
-          primary: "#f3f5f7",
-          secondary: "#aeb5c0"
+          primary: '#f3f0ff',
+          secondary: '#c5bdd8',
         },
-        error: { main: "#ff6b6b" },
-        warning: { main: "#f6bd60" },
-        info: { main: "#64d2ff" },
-        success: { main: "#63d471" }
+        error: { main: '#E53935' },
+        warning: { main: '#FFB74D' },
+        info: { main: '#29B6F6' },
+        success: { main: '#66BB6A' },
       },
       shape: {
-        borderRadius: 0
+        borderRadius: 0,
       },
-      spacing: 10
-    }
-  }
+      spacing: 10,
+    },
+  },
 }

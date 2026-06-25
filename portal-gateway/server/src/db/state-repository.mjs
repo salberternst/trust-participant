@@ -45,7 +45,16 @@ export async function requireStateRow() {
   return row
 }
 
-export async function upsertState({ state, caseId, participantToken, caseData, credentialRequest, credentials, lastError, input }) {
+export async function upsertState({
+  state,
+  caseId,
+  participantToken,
+  caseData,
+  credentialRequest,
+  credentials,
+  lastError,
+  input,
+}) {
   const normalizedCase = normalizeCaseData(caseData)
   await ensureDb()
   await pool.query(

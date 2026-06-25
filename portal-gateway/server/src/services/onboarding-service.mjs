@@ -1,6 +1,10 @@
 import { config, onboardingDefaults } from '../config/index.mjs'
 import { dataspaceFetch } from '../clients/dataspace-admin-client.mjs'
-import { assertIdentityHubConfigured, getIdentityHubParticipantContextPathId, identityHubFetch } from '../clients/identityhub-client.mjs'
+import {
+  assertIdentityHubConfigured,
+  getIdentityHubParticipantContextPathId,
+  identityHubFetch,
+} from '../clients/identityhub-client.mjs'
 import { ensureDb, loadStateRow, patchState, requireStateRow, upsertState } from '../db/state-repository.mjs'
 import { httpError } from '../lib/http-errors.mjs'
 import { isRecord } from '../lib/objects.mjs'
@@ -81,7 +85,7 @@ async function runAutoProgress() {
 
   if (!row || !row.case_id || row.state === 'ONBOARDED') return
 
-  const refreshed = await refreshOnboardingForRow(row, { returnRaw: true })
+  const refreshed = await refreshOnboardingForRow(row)
   row = await loadStateRow()
   const caseState = String(refreshed.case?.state ?? row?.state ?? '')
 
@@ -99,7 +103,7 @@ async function runAutoProgress() {
   }
 
   if (row && row.state !== 'ONBOARDED') {
-    await refreshOnboardingForRow(row, { returnRaw: true })
+    await refreshOnboardingForRow(row)
   }
 }
 
@@ -107,9 +111,12 @@ async function requestCredentialsForRow(row, options = {}) {
   assertParticipantCase(row)
   await assertIdentityHubConfigured()
 
-  const credentialRequest = await dataspaceFetch(`/onboarding-cases/${encodeURIComponent(row.case_id)}/credential-request`, {
-    token: row.participant_token,
-  })
+  const credentialRequest = await dataspaceFetch(
+    `/onboarding-cases/${encodeURIComponent(row.case_id)}/credential-request`,
+    {
+      token: row.participant_token,
+    },
+  )
 
   try {
     await identityHubFetch(
@@ -150,7 +157,7 @@ async function requestCredentialsForRow(row, options = {}) {
   }
 }
 
-async function refreshOnboardingForRow(row, options = {}) {
+async function refreshOnboardingForRow(row) {
   assertParticipantCase(row)
 
   let caseData = row.case_data ?? {}
@@ -170,9 +177,12 @@ async function refreshOnboardingForRow(row, options = {}) {
   if (participantReadyStates.includes(caseState) && hasCredentialRequest(credentialRequest)) {
     try {
       await assertIdentityHubConfigured()
-      credentialRequest = await dataspaceFetch(`/onboarding-cases/${encodeURIComponent(row.case_id)}/credential-request`, {
-        token: row.participant_token,
-      })
+      credentialRequest = await dataspaceFetch(
+        `/onboarding-cases/${encodeURIComponent(row.case_id)}/credential-request`,
+        {
+          token: row.participant_token,
+        },
+      )
       const identityHubResponse = await identityHubFetch(
         `/v1alpha/participants/${encodeURIComponent(getIdentityHubParticipantContextPathId())}/credentials`,
       )
@@ -180,7 +190,9 @@ async function refreshOnboardingForRow(row, options = {}) {
       const expected = Array.isArray(credentialRequest.credentials) ? credentialRequest.credentials : []
       issued =
         expected.length > 0 &&
-        expected.every((item) => credentials.some((credential) => credential.type === item.type || credential.id === item.id))
+        expected.every((item) =>
+          credentials.some((credential) => credential.type === item.type || credential.id === item.id),
+        )
 
       receiptWarning = await reportReceipt(row.case_id, row.participant_token, {
         status: issued ? 'issued' : 'requested',
@@ -204,7 +216,8 @@ async function refreshOnboardingForRow(row, options = {}) {
   const response = await buildRawStateResponse()
   return {
     ...response,
-    message: issued && !receiptWarning ? 'Participant credentials are issued. Opening portal.' : 'Onboarding state refreshed.',
+    message:
+      issued && !receiptWarning ? 'Participant credentials are issued. Opening portal.' : 'Onboarding state refreshed.',
   }
 }
 

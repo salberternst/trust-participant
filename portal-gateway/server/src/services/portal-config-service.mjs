@@ -75,9 +75,7 @@ function sanitizePalette(palette) {
 
 function sanitizeColorGroup(group) {
   if (!group || typeof group !== 'object') return undefined
-  return Object.fromEntries(
-    Object.entries(group).filter(([, value]) => typeof value === 'string'),
-  )
+  return Object.fromEntries(Object.entries(group).filter(([, value]) => typeof value === 'string'))
 }
 
 function sanitizeLogo(logo) {

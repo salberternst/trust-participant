@@ -26,7 +26,10 @@ export async function assertIdentityHubConfigured() {
 }
 
 export function getIdentityHubParticipantContextPathId() {
-  return config.identityHub.participantContextPathId || Buffer.from(config.identityHub.participantContextId).toString('base64')
+  return (
+    config.identityHub.participantContextPathId ||
+    Buffer.from(config.identityHub.participantContextId).toString('base64')
+  )
 }
 
 async function identityHubHeaders() {
