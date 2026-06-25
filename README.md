@@ -97,7 +97,7 @@ Most settings have local defaults in `.env.example`. These are the important dep
 
 ## Participant Portal
 
-The internal gateway routes `/` to `portal-gateway`. That service automatically submits the configured participant metadata, shows a read-only onboarding status page until the participant credentials are issued, observes those credentials in the local IdentityHub, and reports the receipt back to dataspace-admin. After that, it proxies the normal portal image.
+The internal gateway routes `/` to `portal-gateway`. That service automatically submits the configured participant metadata, shows a read-only onboarding status page until the participant credentials are issued, observes those credentials in the local IdentityHub, and reports the receipt back to dataspace-admin. The status page supports English/German copy plus light/dark theme switching and remembers both preferences in the browser. After onboarding, the gateway proxies the normal portal image.
 
 The portal is internal-only by default. It is not connected to the public gateway and does not bind its own host port.
 
