@@ -1,4 +1,4 @@
-import React, { FormEvent, useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 
@@ -37,6 +37,7 @@ type Credential = {
 type GatewayState = {
   state: string
   onboarded: boolean
+  autoSubmit: boolean
   defaults: Defaults
   caseId?: string
   case?: OnboardingCase
@@ -46,26 +47,58 @@ type GatewayState = {
   message?: string
 }
 
-type RequestDraft = Defaults
-
-const emptyDefaults: Defaults = {
-  organizationName: '',
-  requestedBpn: '',
-  did: '',
-  dspEndpoint: '',
-  identityHubCredentialServiceEndpoint: '',
-  contactEmail: '',
-  requestedRole: 'participant',
+type PortalLogoSx = {
+  height?: number | string
+  width?: number | string
 }
+
+type PortalThemeMode = {
+  palette?: {
+    primary?: { main?: string; light?: string; dark?: string; contrastText?: string }
+    secondary?: { main?: string }
+    background?: { default?: string; paper?: string }
+    text?: { primary?: string; secondary?: string }
+    error?: { main?: string }
+    warning?: { main?: string }
+    info?: { main?: string }
+    success?: { main?: string }
+  }
+  shape?: { borderRadius?: number }
+  spacing?: number
+  logo?: { src?: string; alt?: string; sx?: PortalLogoSx }
+}
+
+type PortalConfig = {
+  title?: string
+  theme?: {
+    light?: PortalThemeMode
+    dark?: PortalThemeMode
+  }
+}
+
+declare global {
+  interface Window {
+    config?: PortalConfig
+  }
+}
+
+const portalConfig = window.config ?? {}
+const portalTheme = portalConfig.theme?.light ?? {}
+const portalLogo = portalTheme.logo
+
+applyPortalTheme(portalTheme)
 
 function App() {
   const [state, setState] = useState<GatewayState | null>(null)
-  const [draft, setDraft] = useState<RequestDraft>(emptyDefaults)
   const [busy, setBusy] = useState<string>('')
   const [message, setMessage] = useState<{ tone: 'ok' | 'info' | 'error'; text: string } | null>(null)
 
   useEffect(() => {
     refreshState(false)
+    const interval = window.setInterval(() => {
+      if (!document.hidden) refreshState(false)
+    }, 5000)
+    return () => window.clearInterval(interval)
   }, [])
 
   async function refreshState(showMessage = true) {
@@ -73,8 +106,8 @@ function App() {
     try {
       const next = await api<GatewayState>('/api/onboarding/state')
       setState(next)
-      setDraft((current) => ({ ...next.defaults, ...current, ...emptyToDefaults(current, next.defaults) }))
-      if (showMessage) setMessage({ tone: 'info', text: 'Status refreshed.' })
+      if (showMessage) setMessage({ tone: next.onboarded ? 'ok' : 'info', text: next.message || 'Status refreshed.' })
+      if (next.onboarded) window.setTimeout(() => window.location.assign('/'), 600)
     } catch (error) {
       setMessage({ tone: 'error', text: getErrorMessage(error) })
     } finally {
@@ -82,17 +115,17 @@ function App() {
     }
   }
 
-  async function submitCase(event: FormEvent) {
-    event.preventDefault()
+  async function sendRequest() {
+    if (!state) return
     setBusy('case')
     setMessage(null)
     try {
       const next = await api<GatewayState>('/api/onboarding/cases', {
         method: 'POST',
-        body: draft,
+        body: state.defaults,
       })
       setState(next)
-      setMessage({ tone: 'ok', text: next.message || 'Onboarding request created.' })
+      setMessage({ tone: 'ok', text: next.message || 'Onboarding request sent.' })
     } catch (error) {
       setMessage({ tone: 'error', text: getErrorMessage(error) })
     } finally {
@@ -100,39 +133,20 @@ function App() {
     }
   }
 
-  async function requestCredentials() {
+  async function retryCredentialSetup() {
     setBusy('credentials')
     setMessage(null)
     try {
       const next = await api<GatewayState>('/api/onboarding/credentials/request', { method: 'POST' })
       setState(next)
-      setMessage({ tone: 'ok', text: next.message || 'Credential request submitted.' })
+      setMessage({ tone: 'ok', text: next.message || 'Credential setup retried.' })
+      await refreshState(false)
     } catch (error) {
       setMessage({ tone: 'error', text: getErrorMessage(error) })
     } finally {
       setBusy('')
     }
   }
-
-  async function refreshOnboarding() {
-    setBusy('refresh')
-    setMessage(null)
-    try {
-      const next = await api<GatewayState>('/api/onboarding/refresh', { method: 'POST' })
-      setState(next)
-      setMessage({ tone: next.onboarded ? 'ok' : 'info', text: next.message || 'Onboarding state refreshed.' })
-      if (next.onboarded) window.location.assign('/')
-    } catch (error) {
-      setMessage({ tone: 'error', text: getErrorMessage(error) })
-    } finally {
-      setBusy('')
-    }
-  }
-
-  const canRequestCredentials = useMemo(() => {
-    const caseState = state?.case?.state || state?.state || ''
-    return Boolean(state?.caseId && ['READY_FOR_PARTICIPANT', 'CREDENTIALS_REQUESTED', 'ACTIVE'].includes(caseState))
-  }, [state])
 
   if (!state) {
     return <main className="shell"><div className="panel">Loading onboarding state...</div></main>
@@ -140,91 +154,116 @@ function App() {
 
   const caseData = state.case
   const isBusy = Boolean(busy)
+  const setupSteps = buildSetupSteps(state)
+  const details = buildParticipantDetails(state)
+  const approved = isApproved(state)
+  const canRetryCredentials = Boolean(state.caseId && approved && !state.onboarded && state.lastError)
 
   return (
     <main className="shell">
-      <section className="header">
-        <div>
-          <p className="eyebrow">Trust Participant</p>
-          <h1>Onboarding</h1>
+      <section className="topbar">
+        <div className="brand">
+          {portalLogo?.src && (
+            <img
+              src={portalLogo.src}
+              alt={portalLogo.alt || portalConfig.title || 'Portal logo'}
+              style={logoStyle(portalLogo.sx)}
+            />
+          )}
+          <span>{portalConfig.title || 'Portal'}</span>
         </div>
-        <span className={`status status-${state.onboarded ? 'ok' : 'pending'}`}>{state.state}</span>
+        <button type="button" className="button-secondary" onClick={() => refreshState()} disabled={isBusy}>Refresh</button>
+      </section>
+
+      <section className="hero">
+        <div>
+          <p className="eyebrow">Participant access</p>
+          <h1>{state.onboarded ? 'Ready for the portal' : 'Setting up portal access'}</h1>
+          <p className="lede">{statusDescription(state)}</p>
+        </div>
+        <StatusBadge state={state} />
       </section>
 
       {message && <div className={`message ${message.tone}`}>{message.text}</div>}
       {state.lastError && <div className="message error">{state.lastError}</div>}
 
       <section className="layout">
-        <form className="panel" onSubmit={submitCase}>
+        <section className="panel request-panel">
           <div className="panel-title">
-            <h2>Participant request</h2>
-            <button type="button" onClick={() => refreshState()} disabled={isBusy}>Refresh</button>
+            <div>
+              <h2>Configured participant</h2>
+              <p>These values come from the participant deployment configuration and are submitted to the operator.</p>
+            </div>
           </div>
-          <div className="grid">
-            <Field label="Organization" value={draft.organizationName} onChange={(value) => updateDraft('organizationName', value)} required />
-            <Field label="Requested BPN" value={draft.requestedBpn} onChange={(value) => updateDraft('requestedBpn', value)} />
-            <Field label="DID" value={draft.did} onChange={(value) => updateDraft('did', value)} />
-            <Field label="DSP endpoint" value={draft.dspEndpoint} onChange={(value) => updateDraft('dspEndpoint', value)} />
-            <Field label="Credential service" value={draft.identityHubCredentialServiceEndpoint} onChange={(value) => updateDraft('identityHubCredentialServiceEndpoint', value)} />
-            <Field label="Contact email" type="email" value={draft.contactEmail} onChange={(value) => updateDraft('contactEmail', value)} required />
-            <Field label="Requested role" value={draft.requestedRole} onChange={(value) => updateDraft('requestedRole', value)} required />
-          </div>
-          <div className="actions">
-            <button type="submit" disabled={isBusy || state.onboarded}>{state.caseId ? 'Replace request' : 'Create request'}</button>
-            <button type="button" onClick={requestCredentials} disabled={isBusy || !canRequestCredentials || state.onboarded}>Request credentials</button>
-            <button type="button" onClick={refreshOnboarding} disabled={isBusy || !state.caseId || state.onboarded}>Poll credentials</button>
-          </div>
-        </form>
 
-        <aside className="panel summary">
-          <h2>Status</h2>
-          <Info label="Case" value={state.caseId || 'Not created'} mono />
-          <Info label="Operator state" value={caseData?.state || '-'} />
-          <Info label="Assigned BPN" value={caseData?.assignedBpn || caseData?.bpn || '-'} mono />
-          <Info label="Updated" value={state.updatedAt ? new Date(state.updatedAt).toLocaleString() : '-'} />
-          <div className="checks">
-            {(caseData?.setupChecks || []).map((check) => (
-              <div key={check.name} className="check">
-                <span>{check.name}</span>
-                <strong>{check.status}</strong>
-                <small>{check.message}</small>
-              </div>
-            ))}
+          <div className="grid primary-fields">
+            <Info label="Organization" value={details.organizationName} />
+            <Info label="Contact email" value={details.contactEmail} />
+            <Info label="Requested BPN" value={details.requestedBpn} mono />
+            <Info label="Requested role" value={details.requestedRole} />
+          </div>
+
+          <details className="technical-fields">
+            <summary>Technical connection details</summary>
+            <div className="grid">
+              <Info label="DID" value={details.did} mono />
+              <Info label="DSP endpoint" value={details.dspEndpoint} />
+              <Info label="Credential service" value={details.identityHubCredentialServiceEndpoint} />
+            </div>
+          </details>
+
+          <div className="actions">
+            {!state.caseId && <button type="button" onClick={sendRequest} disabled={isBusy}>{state.autoSubmit ? 'Retry request' : 'Send request'}</button>}
+            {state.caseId && !state.onboarded && <button type="button" onClick={() => refreshState()} disabled={isBusy}>Check now</button>}
+            {canRetryCredentials && <button type="button" onClick={retryCredentialSetup} disabled={isBusy}>Retry credential setup</button>}
+            <button type="button" className="button-secondary" onClick={() => refreshState()} disabled={isBusy}>Refresh status</button>
+          </div>
+        </section>
+
+        <aside className="panel progress-panel">
+          <div className="panel-title compact">
+            <h2>Setup progress</h2>
+          </div>
+          <div className="steps">
+            {setupSteps.map((step) => <StepItem key={step.label} {...step} />)}
+          </div>
+          <div className="summary-list">
+            <Info label="Operator state" value={displayState(caseData?.state || state.state)} />
+            <Info label="Assigned BPN" value={caseData?.assignedBpn || caseData?.bpn || 'Pending'} mono />
+            <Info label="Updated" value={state.updatedAt ? new Date(state.updatedAt).toLocaleString() : '-'} />
           </div>
         </aside>
       </section>
 
-      <section className="panel credentials">
-        <div className="panel-title">
-          <h2>IdentityHub credentials</h2>
-          <span>{state.credentials.length}</span>
+      <details className="panel technical-panel">
+        <summary>Technical details</summary>
+        <div className="technical-grid">
+          <Info label="Case" value={state.caseId || 'Not created'} mono />
+          <Info label="Credential records" value={String(state.credentials.length)} />
         </div>
-        <div className="table">
-          <div className="row heading"><span>Type</span><span>Issuer</span><span>State</span></div>
-          {state.credentials.map((credential) => (
-            <div className="row" key={credential.id}>
-              <span>{credential.type}</span>
-              <span>{credential.issuer || '-'}</span>
-              <span>{credential.state || '-'}</span>
+        <div className="checks">
+          {(caseData?.setupChecks || []).map((check) => (
+            <div key={check.name} className="check">
+              <span>{check.name}</span>
+              <strong>{displayState(check.status)}</strong>
+              <small>{check.message}</small>
             </div>
           ))}
-          {!state.credentials.length && <div className="empty">No credentials observed yet.</div>}
         </div>
-      </section>
+        {state.credentials.length > 0 && (
+          <div className="table">
+            <div className="row heading"><span>Type</span><span>Issuer</span><span>State</span></div>
+            {state.credentials.map((credential) => (
+              <div className="row" key={credential.id}>
+                <span>{credential.type}</span>
+                <span>{credential.issuer || '-'}</span>
+                <span>{displayState(credential.state || '-')}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </details>
     </main>
-  )
-
-  function updateDraft(field: keyof RequestDraft, value: string) {
-    setDraft((current) => ({ ...current, [field]: value }))
-  }
-}
-
-function Field(props: { label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean }) {
-  return (
-    <label className="field">
-      <span>{props.label}</span>
-      <input type={props.type || 'text'} value={props.value} onChange={(event) => props.onChange(event.target.value)} required={props.required} />
-    </label>
   )
 }
 
@@ -232,15 +271,92 @@ function Info(props: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="info">
       <span>{props.label}</span>
-      <strong className={props.mono ? 'mono' : ''}>{props.value}</strong>
+      <strong className={props.mono ? 'mono' : ''}>{props.value || '-'}</strong>
     </div>
   )
 }
 
-function emptyToDefaults(current: RequestDraft, defaults: Defaults) {
-  return Object.fromEntries(
-    Object.entries(current).map(([key, value]) => [key, value || defaults[key as keyof Defaults] || '']),
-  ) as RequestDraft
+function StatusBadge(props: { state: GatewayState }) {
+  const tone = props.state.onboarded ? 'ok' : props.state.caseId ? 'pending' : 'idle'
+  return <span className={`status status-${tone}`}>{displayState(props.state.onboarded ? 'ACTIVE' : props.state.state)}</span>
+}
+
+function StepItem(props: { label: string; detail: string; state: 'done' | 'active' | 'waiting' }) {
+  return (
+    <div className={`step step-${props.state}`}>
+      <span className="step-marker" aria-hidden="true" />
+      <div>
+        <strong>{props.label}</strong>
+        <p>{props.detail}</p>
+      </div>
+    </div>
+  )
+}
+
+function buildParticipantDetails(state: GatewayState) {
+  const caseData = state.case ?? {}
+  const defaults = state.defaults
+  return {
+    organizationName: caseData.organizationName || defaults.organizationName,
+    requestedBpn: caseData.requestedBpn || defaults.requestedBpn,
+    did: caseData.did || defaults.did,
+    dspEndpoint: caseData.dspEndpoint || defaults.dspEndpoint,
+    identityHubCredentialServiceEndpoint: caseData.identityHubCredentialServiceEndpoint || defaults.identityHubCredentialServiceEndpoint,
+    contactEmail: caseData.contactEmail || defaults.contactEmail,
+    requestedRole: caseData.requestedRole || defaults.requestedRole,
+  }
+}
+
+function buildSetupSteps(state: GatewayState) {
+  const requestDone = Boolean(state.caseId)
+  const approved = isApproved(state)
+  const accessDone = state.onboarded
+
+  return [
+    {
+      label: 'Request sent',
+      detail: requestDone
+        ? 'The configured participant metadata has been submitted.'
+        : state.autoSubmit
+          ? 'The gateway is submitting the configured participant metadata.'
+          : 'Automatic submission is disabled; send the configured request manually.',
+      state: requestDone ? 'done' : 'active',
+    },
+    {
+      label: 'Operator approval',
+      detail: approved ? 'The operator has approved the participant request.' : 'Waiting for the operator to review and approve the request.',
+      state: approved ? 'done' : requestDone ? 'active' : 'waiting',
+    },
+    {
+      label: 'Credentials and portal access',
+      detail: accessDone
+        ? 'The expected credentials are available. The portal will open automatically.'
+        : approved
+          ? 'The gateway is requesting credentials and checking IdentityHub.'
+          : 'Credential setup starts automatically after approval.',
+      state: accessDone ? 'done' : approved ? 'active' : 'waiting',
+    },
+  ] as Array<{ label: string; detail: string; state: 'done' | 'active' | 'waiting' }>
+}
+
+function isApproved(state: GatewayState) {
+  const caseState = state.case?.state || state.state || ''
+  return ['READY_FOR_PARTICIPANT', 'CREDENTIALS_REQUESTED', 'ACTIVE', 'ONBOARDED'].includes(caseState) || state.onboarded
+}
+
+function statusDescription(state: GatewayState) {
+  if (state.onboarded) return 'Your participant has been activated. The gateway will now open the normal portal.'
+  if (!state.caseId && !state.autoSubmit) return 'Automatic request submission is disabled. Send the configured request to start onboarding.'
+  if (!state.caseId) return 'The gateway is sending the configured participant request to the operator.'
+  if (isApproved(state)) return 'The operator has approved the request. The gateway is completing credential setup automatically.'
+  return 'Your request is with the operator. This page refreshes regularly and will continue automatically after approval.'
+}
+
+function displayState(value: string) {
+  return value
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 async function api<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
@@ -256,6 +372,79 @@ async function api<T>(path: string, options: { method?: string; body?: unknown }
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
+}
+
+function applyPortalTheme(theme: PortalThemeMode) {
+  const root = document.documentElement
+  const palette = theme.palette ?? {}
+  const primaryMain = palette.primary?.main ?? '#0043ce'
+  const primaryDark = palette.primary?.dark ?? primaryMain
+  const primaryLight = palette.primary?.light ?? colorMix(primaryMain, '#ffffff', 0.78)
+  const textPrimary = palette.text?.primary ?? '#544f5a'
+  const textSecondary = palette.text?.secondary ?? '#89868D'
+  const paper = palette.background?.paper ?? '#ffffff'
+  const background = palette.background?.default ?? '#ffffff'
+  const borderRadius = theme.shape?.borderRadius ?? 0
+  const spacing = theme.spacing ?? 10
+
+  setCssVars(root, {
+    '--portal-primary': primaryMain,
+    '--portal-primary-dark': primaryDark,
+    '--portal-primary-light': primaryLight,
+    '--portal-primary-contrast': palette.primary?.contrastText ?? '#ffffff',
+    '--portal-secondary': palette.secondary?.main ?? '#1D49B8',
+    '--portal-bg': background,
+    '--portal-paper': paper,
+    '--portal-text': textPrimary,
+    '--portal-muted': textSecondary,
+    '--portal-border': colorMix(textSecondary, paper, 0.7),
+    '--portal-focus': colorMix(primaryMain, paper, 0.82),
+    '--portal-radius': `${borderRadius}px`,
+    '--portal-space': `${spacing}px`,
+    '--portal-error': palette.error?.main ?? '#E53935',
+    '--portal-warning': palette.warning?.main ?? '#FFB74D',
+    '--portal-info': palette.info?.main ?? '#29B6F6',
+    '--portal-success': palette.success?.main ?? '#66BB6A',
+  })
+}
+
+function setCssVars(element: HTMLElement, values: Record<string, string>) {
+  Object.entries(values).forEach(([name, value]) => element.style.setProperty(name, value))
+}
+
+function colorMix(foreground: string, background: string, backgroundWeight: number) {
+  const fg = hexToRgb(foreground)
+  const bg = hexToRgb(background)
+  if (!fg || !bg) return foreground
+  const fgWeight = 1 - backgroundWeight
+  return `rgb(${Math.round(fg.r * fgWeight + bg.r * backgroundWeight)}, ${Math.round(fg.g * fgWeight + bg.g * backgroundWeight)}, ${Math.round(fg.b * fgWeight + bg.b * backgroundWeight)})`
+}
+
+function hexToRgb(color: string) {
+  const normalized = color.trim().replace('#', '')
+  const hex = normalized.length === 3
+    ? normalized.split('').map((value) => value + value).join('')
+    : normalized
+  if (!/^[\da-f]{6}$/i.test(hex)) return null
+  const value = Number.parseInt(hex, 16)
+  return {
+    r: (value >> 16) & 255,
+    g: (value >> 8) & 255,
+    b: value & 255,
+  }
+}
+
+function logoStyle(sx?: PortalLogoSx) {
+  if (!sx) return undefined
+  return {
+    height: toCssSize(sx.height),
+    width: toCssSize(sx.width),
+  }
+}
+
+function toCssSize(value: number | string | undefined) {
+  if (typeof value === 'number') return `${value}px`
+  return value
 }
 
 createRoot(document.getElementById('root') as HTMLElement).render(<App />)

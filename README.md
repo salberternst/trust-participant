@@ -87,6 +87,7 @@ Most settings have local defaults in `.env.example`. These are the important dep
 | `PORTAL_TITLE` | `Participant Portal` | Title written into the portal runtime config. |
 | `PORTAL_PUBLIC_EDC_ENDPOINT` | empty | Optional remote DSP endpoint shown/used by the portal. |
 | `ONBOARDING_DATASPACE_ADMIN_API_URL` | `http://dataspace-admin:3000/api` | Trust operator dataspace-admin participant API. |
+| `ONBOARDING_AUTO_SUBMIT` | `true` | Automatically create the onboarding case from configured values when the portal gate is opened. |
 | `ONBOARDING_ORGANIZATION_NAME` | `Example Participant` | Default organization shown in the onboarding form. |
 | `ONBOARDING_CONTACT_EMAIL` | `ops@example.test` | Default contact email shown in the onboarding form. |
 | `ONBOARDING_CREDENTIAL_SERVICE_ENDPOINT` | `https://participant.external.test/api/credentials` | Public credential service metadata submitted for onboarding. |
@@ -96,7 +97,7 @@ Most settings have local defaults in `.env.example`. These are the important dep
 
 ## Participant Portal
 
-The internal gateway routes `/` to `portal-gateway`. That service shows the onboarding form until the participant credentials are issued, observed in the local IdentityHub, and reported back to dataspace-admin. After that, it proxies the normal portal image.
+The internal gateway routes `/` to `portal-gateway`. That service automatically submits the configured participant metadata, shows a read-only onboarding status page until the participant credentials are issued, observes those credentials in the local IdentityHub, and reports the receipt back to dataspace-admin. After that, it proxies the normal portal image.
 
 The portal is internal-only by default. It is not connected to the public gateway and does not bind its own host port.
 

@@ -9,6 +9,7 @@
     "start": "node server/index.mjs"
   },
   "dependencies": {
+    "express": "^5.2.1",
     "pg": "latest"
   },
   "devDependencies": {
