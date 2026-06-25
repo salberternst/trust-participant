@@ -150,6 +150,17 @@ docker build -t trust-participant-portal-gateway:local -f portal-gateway/Dockerf
 PARTICIPANT_PORTAL_GATEWAY_IMAGE=trust-participant-portal-gateway:local docker compose up -d
 ```
 
+## Pre-commit
+
+The repository uses local `pre-commit` hooks for the portal gateway and shell scripts:
+
+```sh
+pre-commit install
+pre-commit run --all-files
+```
+
+The hooks run the portal-gateway formatter, portal-gateway lint, and shell syntax validation for `init/participant-init.sh` plus `tools/scripts/*.sh`. Run `npm ci` in `portal-gateway` before using the hooks locally. If the formatter rewrites files, stage the changed files and commit again.
+
 ## Publish as OCI
 
 Tag pushes publish both artifacts to GHCR via `.github/workflows/publish-compose.yml`. A Git tag like `v0.1.0` publishes:
